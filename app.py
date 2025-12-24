@@ -57,7 +57,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
 
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
-        # ★ここを詳細版に戻しました
         st.caption("""
         **📈 利回りの目安 (長期・円ベース)**
         - 🇯🇵 **TOPIX**: 4% 〜 6%
@@ -67,7 +66,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         """)
         
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
-        # ★ここを詳細版に戻しました
         st.caption("""
         **📊 リスクの目安 (円ベース)**
         - 🇯🇵 **TOPIX**: 15% 〜 18%
@@ -283,9 +281,10 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             progress_bar.progress(1.0)
 
             # --- 結果集計 ---
+            # ★ここで上位20%、下位20%を計算
             median_res = np.percentile(simulation_results, 50, axis=0)
-            top_10_res = np.percentile(simulation_results, 90, axis=0)
-            bottom_10_res = np.percentile(simulation_results, 10, axis=0)
+            top_20_res = np.percentile(simulation_results, 80, axis=0)
+            bottom_20_res = np.percentile(simulation_results, 20, axis=0)
             ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
 
             st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
@@ -302,14 +301,14 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 * **生存率**: 資産が底をつかない確率。80%以上が目安。
                 * **単純計算**: 決まった利回りで増え続けた場合の金額。
                 * **中央値**: 最も現実的なシミュレーション結果。
-                * **不調時**: 運悪く相場が悪かった場合の結果。
+                * **好調/不調**: **上位20%** と **下位20%** のラインを表示しています。
                 """)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
             c2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
             c3.metric("中央値", f"{int(median_res[-1]):,}万")
-            c4.metric("不調時", f"{int(bottom_10_res[-1]):,}万")
+            c4.metric("不調時 (下位20%)", f"{int(bottom_20_res[-1]):,}万")
 
             # グラフ
             fig, ax = plt.subplots(figsize=(10, 6))
@@ -322,14 +321,14 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # 赤字期間(オレンジ)
             for y in range(years):
                 age = current_age + y
-                # 実際のキャッシュフロー(年金込)を確認
                 flow = cashflow_map.get(age, 0)
                 if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
 
             ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
             ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
-            ax.plot(age_axis, top_10_res, color='green', linestyle='--', linewidth=1, label='好調')
-            ax.plot(age_axis, bottom_10_res, color='red', linestyle='--', linewidth=1, label='不調')
+            # ★ここで上位20%、下位20%を表示
+            ax.plot(age_axis, top_20_res, color='green', linestyle='--', linewidth=1, label='好調 (上位20%)')
+            ax.plot(age_axis, bottom_20_res, color='red', linestyle='--', linewidth=1, label='不調 (下位20%)')
             
             ax.set_title("資産推移", fontsize=14)
             ax.set_xlabel("年齢")
