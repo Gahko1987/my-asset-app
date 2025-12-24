@@ -57,10 +57,24 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
 
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
-        st.caption("📈 目安: オルカン 5-8%, S&P500 7-10%")
+        # ★ここを詳細版に戻しました
+        st.caption("""
+        **📈 利回りの目安 (長期・円ベース)**
+        - 🇯🇵 **TOPIX**: 4% 〜 6%
+        - 🌏 **オルカン**: 5% 〜 8%
+        - 🇺🇸 **S&P500**: 7% 〜 10%
+        - 🏛 **NASDAQ**: 9% 〜 13%
+        """)
         
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
-        st.caption("📊 目安: オルカン 17-20%, S&P500 19-23%")
+        # ★ここを詳細版に戻しました
+        st.caption("""
+        **📊 リスクの目安 (円ベース)**
+        - 🇯🇵 **TOPIX**: 15% 〜 18%
+        - 🌏 **オルカン**: 17% 〜 20%
+        - 🇺🇸 **S&P500**: 19% 〜 23%
+        - 🏛 **NASDAQ**: 23% 〜 28%
+        """)
 
 # 計算用数値
 mean_return = mean_return_pct / 100
@@ -325,7 +339,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
             
-            # ★ここに追加した説明
             st.caption("※ グラフ背景の色について：")
             st.caption("🟦 **水色**: 教育費がかかる期間")
             st.caption("🟧 **オレンジ**: 収支が赤字（貯金取崩し）の期間")
