@@ -50,7 +50,7 @@ with col1:
             {"開始年齢": 20, "終了年齢": 30, "収支(万円)": 100},
             {"開始年齢": 31, "終了年齢": 60, "収支(万円)": 400},
             {"開始年齢": 61, "終了年齢": 65, "収支(万円)": 100},
-            {"開始年齢": 66, "終了年齢": 100, "収支(万円)": -300}, # ここを100歳に変更
+            {"開始年齢": 66, "終了年齢": 100, "収支(万円)": -300},
         ])
 
     edited_phases = st.data_editor(
@@ -80,4 +80,116 @@ with col1:
             break
         next_start_age = int(end_age_val) + 1
 
-    if needs
+    # ★ここがエラーの原因でした。正しくは if needs_rerun: です
+    if needs_rerun:
+        st.session_state.df_phases = temp_df
+        st.rerun()
+
+# === 右側（スマホでは下）：イベント入力 ===
+with col2:
+    st.subheader("2. イベント・一時金")
+    st.caption("退職金(プラス)や大きな買い物(マイナス)")
+    
+    default_events = [
+        {"年齢": 60, "金額(万円)": 2000, "内容": "退職金"},
+        {"年齢": 30, "金額(万円)": -500, "内容": "結婚・住宅頭金など"},
+    ]
+    if "df_events_init" not in st.session_state:
+        st.session_state.df_events_init = pd.DataFrame(default_events)
+
+    edited_events = st.data_editor(
+        st.session_state.df_events_init,
+        num_rows="dynamic",
+        use_container_width=True
+    )
+
+# --- シミュレーション実行ボタン ---
+st.divider()
+if st.button("シミュレーションを実行する", type="primary"):
+    
+    try:
+        # データ整理
+        phases_data = st.session_state.df_phases.copy()
+        if phases_data.empty:
+             end_age = 100
+        else:
+             valid_phases = phases_data.dropna(subset=["終了年齢"])
+             if valid_phases.empty:
+                 end_age = 100
+             else:
+                 end_age = int(valid_phases["終了年齢"].max())
+
+        years = end_age - current_age
+        num_simulations = 1000
+        
+        cashflow_map = {}
+        for index, row in phases_data.iterrows():
+            if pd.isna(row["開始年齢"]) or pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
+                continue
+            start, end, amount = int(row["開始年齢"]), int(row["終了年齢"]), row["収支(万円)"]
+            for age in range(start, end + 1):
+                cashflow_map[age] = amount
+
+        event_map = {}
+        for index, row in edited_events.iterrows():
+            if pd.isna(row["年齢"]) or pd.isna(row["金額(万円)"]):
+                continue
+            try:
+                age = int(row["年齢"])
+                amount = int(row["金額(万円)"])
+                event_map[age] = event_map.get(age, 0) + amount
+            except:
+                continue
+
+        # --- A. 単純計算 ---
+        deterministic_assets = [current_assets]
+        for year in range(years):
+            age = current_age + year
+            annual_flow = cashflow_map.get(age, 0)
+            spot_flow = event_map.get(age, 0)
+            
+            prev_asset = deterministic_assets[-1]
+            if prev_asset <= 0:
+                new_value = 0
+            else:
+                total_principal = prev_asset + annual_flow + spot_flow
+                new_value = total_principal * (1 + real_mean_return)
+                if new_value < 0: new_value = 0
+            deterministic_assets.append(new_value)
+
+        # --- B. モンテカルロ ---
+        simulation_results = np.zeros((num_simulations, years + 1))
+        
+        for i in range(num_simulations):
+            assets = [current_assets]
+            for year in range(years):
+                age = current_age + year
+                annual_flow = cashflow_map.get(age, 0)
+                spot_flow = event_map.get(age, 0)
+                market_return = np.random.normal(real_mean_return, risk_std)
+                
+                prev_asset = assets[-1]
+                if prev_asset <= 0:
+                    new_value = 0
+                else:
+                    total_principal = prev_asset + annual_flow + spot_flow
+                    new_value = total_principal * (1 + market_return)
+                    if new_value < 0: new_value = 0
+                assets.append(new_value)
+            simulation_results[i, :] = assets
+
+        # 結果表示
+        median_res = np.percentile(simulation_results, 50, axis=0)
+        top_10_res = np.percentile(simulation_results, 90, axis=0)
+        bottom_10_res = np.percentile(simulation_results, 10, axis=0)
+        ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
+
+        st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
+        res_col1, res_col2, res_col3, res_col4 = st.columns(4)
+        res_col1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
+        res_col2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
+        res_col3.metric("中央値", f"{int(median_res[-1]):,}万")
+        res_col4.metric("不調時", f"{int(bottom_10_res[-1]):,}万")
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        age_axis = np.arange(current_age, end_age + 1)
