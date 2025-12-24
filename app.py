@@ -215,14 +215,10 @@ with col1:
             new_end = st.number_input(f"何歳まで？ (第{i+1}期間)", min_value=min_val, max_value=150, value=current_end_val, key=f"phase_end_{i}")
             st.session_state.phases_list[i]["end"] = new_end
         with c_p2:
-            # ★修正点: min_value, max_value, stepを設定して入力不具合を解消
+            # ★元に戻しました（シンプルな入力欄）
             new_amount = st.number_input(
                 f"年間の収支 (万円)", 
-                min_value=-10000,
-                max_value=10000,
                 value=int(phase["amount"]), 
-                step=10,
-                format="%+d", 
                 key=f"phase_amount_{i}"
             )
             st.session_state.phases_list[i]["amount"] = new_amount
