@@ -15,36 +15,61 @@ st.title("📊 資産＆ライフプラン シミュレーター")
 # 文部科学省「子供の学習費調査」などを参考に概算
 # ==========================================
 EDU_COSTS = {
-    "all_public": { # すべて国公立
-        "kindergarten": 23,  # 公立幼稚園
-        "elementary": 35,    # 公立小学校
-        "junior_high": 54,   # 公立中学校
-        "high_school": 52,   # 公立高校
-        "university": 120    # 国立大学(自宅)
+    # 1. すべて国公立 (大学4年)
+    "all_public": {
+        "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52,
+        "university": 120 # 国立大
     },
-    "private_uni": { # 大学だけ私立（一般的）
-        "kindergarten": 23,  # 公立
-        "elementary": 35,    # 公立
-        "junior_high": 54,   # 公立
-        "high_school": 52,   # 公立
-        "university": 172    # 私立大学文系(自宅)
+    # 2. 大学だけ私立 (大学4年)
+    "private_uni": {
+        "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52,
+        "university": 172 # 私立大(文系)
     },
-    "all_private": { # すべて私立
-        "kindergarten": 36,  # 私立幼稚園
-        "elementary": 170,   # 私立小学校
-        "junior_high": 144,  # 私立中学校
-        "high_school": 105,  # 私立高校
-        "university": 172    # 私立大学文系
+    # 3. すべて私立 (大学4年)
+    "all_private": {
+        "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105,
+        "university": 172 # 私立大(文系)
+    },
+    # 4. 専門学校 (2年)
+    "vocational": {
+        "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52,
+        "vocational_school": 130 # 専門学校(概算)
+    },
+    # 5. 短期大学 (2年)
+    "junior_college": {
+        "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52,
+        "junior_college": 120 # 短大(概算)
+    },
+    # 6. 高校卒業まで (進学なし)
+    "high_school_grad": {
+        "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52
+        # 大学費用なし
     }
 }
 
-# 学年と年齢の対応ロジック
-def get_school_stage(age):
+# 学年と年齢の対応ロジック（コースによって期間を変える）
+def get_school_stage(age, course_type):
     if 3 <= age <= 5: return "kindergarten"
     if 6 <= age <= 11: return "elementary"
     if 12 <= age <= 14: return "junior_high"
     if 15 <= age <= 17: return "high_school"
-    if 18 <= age <= 21: return "university"
+    
+    # 18歳以降の分岐
+    if 18 <= age <= 21:
+        # 4年制大学へ行くコース
+        if course_type in ["all_public", "private_uni", "all_private"]:
+            return "university"
+        
+        # 2年制（専門・短大）へ行くコース (20,21歳は無し)
+        if course_type == "vocational" and age <= 19:
+            return "vocational_school"
+        if course_type == "junior_college" and age <= 19:
+            return "junior_college"
+            
+        # 高卒コース (18歳以降なし)
+        if course_type == "high_school_grad":
+            return None
+            
     return None
 
 # 表表示用の略称
@@ -53,7 +78,9 @@ STAGE_NAMES = {
     "elementary": "小",
     "junior_high": "中",
     "high_school": "高",
-    "university": "大"
+    "university": "大",
+    "vocational_school": "専", # 専門学校
+    "junior_college": "短"    # 短大
 }
 
 # ==========================================
@@ -216,10 +243,14 @@ with col2:
                 new_age = st.number_input("現在の年齢", 0, 30, int(child["age"]), key=f"child_age_{i}")
                 st.session_state.children_list[i]["age"] = new_age
             with c_in2:
+                # 選択肢の定義（キー：表示名）
                 course_opts = {
-                    "all_public": "すべて国公立 (標準)",
-                    "private_uni": "大学だけ私立 (平均)",
-                    "all_private": "すべて私立 (手厚い)"
+                    "all_public": "国公立大 (標準)",
+                    "private_uni": "私立大学 (平均)",
+                    "all_private": "すべて私立 (手厚い)",
+                    "vocational": "専門学校 (2年)",
+                    "junior_college": "短期大学 (2年)",
+                    "high_school_grad": "高校卒業まで"
                 }
                 current_c = child["course"]
                 if current_c not in course_opts: current_c = "private_uni"
@@ -305,7 +336,10 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     current_c_age = c_age + y
                     parent_age = current_age + y
                     if parent_age > end_age: break
-                    stage = get_school_stage(current_c_age)
+                    
+                    # コースを引数に渡す
+                    stage = get_school_stage(current_c_age, c_course)
+                    
                     if stage:
                         cost = EDU_COSTS[c_course][stage]
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
@@ -419,8 +453,8 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
-
-            # ★グラフ下に説明書きを追加
+            
+            # 説明書き
             st.caption("※ グラフ背景の色について：")
             st.caption("🟦 **水色の期間**: お子様の教育費がかかっている期間")
             st.caption("🟧 **オレンジの期間**: 年間の収支がマイナス（貯金を取り崩している）期間")
@@ -435,7 +469,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             target_ages = list(range(current_age, end_age + 1, step_years))
             if target_ages[-1] != end_age: target_ages.append(end_age)
             
-            # ★10%刻みの表示
             percentile_ranges = [
                 (90, 100, "上位 10%"),
                 (80, 90, "11% - 20%"),
@@ -485,7 +518,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # --- 追加: 教育費詳細テーブル（一番下へ） ---
             st.divider()
             st.subheader("🎓 教育費の内訳詳細")
-            st.caption("自動で差し引かれた教育費の内訳です。（幼:幼稚園, 小:小学校, 中:中学校, 高:高校, 大:大学）")
+            st.caption("自動で差し引かれた教育費の内訳です。（幼:幼稚園, 小:小学校, 中:中学校, 高:高校, 大:大学, 専:専門学校, 短:短大）")
             
             edu_table_data = []
             for y in range(years + 1):
@@ -496,7 +529,9 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
 
                 for i, child in enumerate(st.session_state.children_list):
                     c_age = child["age"] + y
-                    stage = get_school_stage(c_age)
+                    # コースを渡す
+                    stage = get_school_stage(c_age, child["course"])
+                    
                     if stage:
                         cost = EDU_COSTS[child["course"]][stage]
                         yearly_total += cost
