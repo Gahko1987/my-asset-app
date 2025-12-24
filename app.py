@@ -412,13 +412,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.plot(age_axis, top_10_res, color='green', linestyle='--', linewidth=1, label='好調')
             ax.plot(age_axis, bottom_10_res, color='red', linestyle='--', linewidth=1, label='不調')
             
-            ax.set_title("資産推移 (水色: 教育費負担期間)", fontsize=14)
+            ax.set_title("資産推移", fontsize=14)
             ax.set_xlabel("年齢")
             ax.set_ylabel("資産額 (万円)")
             ax.legend()
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
+
+            # ★グラフ下に説明書きを追加
+            st.caption("※ グラフ背景の色について：")
+            st.caption("🟦 **水色の期間**: お子様の教育費がかかっている期間")
+            st.caption("🟧 **オレンジの期間**: 年間の収支がマイナス（貯金を取り崩している）期間")
 
             st.divider()
             
@@ -430,7 +435,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             target_ages = list(range(current_age, end_age + 1, step_years))
             if target_ages[-1] != end_age: target_ages.append(end_age)
             
-            # ★ここを10%刻みに戻しました★
+            # ★10%刻みの表示
             percentile_ranges = [
                 (90, 100, "上位 10%"),
                 (80, 90, "11% - 20%"),
