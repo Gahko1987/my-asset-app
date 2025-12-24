@@ -22,8 +22,19 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
     with col_b2:
-        mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 10.0, 5.0, 0.1)
-        risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 30.0, 15.0, 0.5)
+        mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
+        
+        # リスクスライダー
+        risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
+        
+        # ★ここに追加：リスクの参考データを表示
+        st.caption("""
+        **📊 リスクの目安 (円ベース)**
+        - 🇯🇵 **TOPIX**: 15% 〜 18%
+        - 🌏 **オルカン**: 17% 〜 20%
+        - 🇺🇸 **S&P500**: 19% 〜 23%
+        - 🏛 **NASDAQ**: 23% 〜 28%
+        """)
 
 # 計算用数値
 mean_return = mean_return_pct / 100
@@ -88,22 +99,19 @@ with col1:
         
         c_p1, c_p2 = st.columns([1, 1])
         with c_p1:
-            # ★エラー修正ポイント★
-            # 現在の「開始年齢」よりも「保存されている終了年齢」が小さくなってしまった場合、
-            # 強制的に「開始年齢」と同じ値に修正してエラーを防ぐ
+            # 年齢矛盾のエラー回避ロジック
             min_val = start_age_tracker
             current_end_val = int(phase["end"])
             
             if current_end_val < min_val:
                 current_end_val = min_val
-                # 内部データも更新しておく
                 st.session_state.phases_list[i]["end"] = current_end_val
 
             new_end = st.number_input(
                 f"何歳まで？ (第{i+1}期間)",
-                min_value=min_val,  # ここが start_age_tracker
+                min_value=min_val,
                 max_value=150,
-                value=current_end_val, # 修正済みの値を使う
+                value=current_end_val,
                 key=f"phase_end_{i}"
             )
             st.session_state.phases_list[i]["end"] = new_end
@@ -143,9 +151,7 @@ with col2:
             
             e_in1, e_in2, e_in3 = st.columns([1, 1, 1.5])
             with e_in1:
-                # イベントも年齢矛盾でエラーにならないよう安全策をとる
                 ev_val = int(event["age"])
-                # マイナス年齢などは0にする
                 if ev_val < 0: ev_val = 0
                 
                 new_age = st.number_input("年齢", min_value=0, max_value=150, value=ev_val, key=f"ev_age_{i}")
