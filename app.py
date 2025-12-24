@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import japanize_matplotlib  # ←★この1行が絶対に必要です！
 import matplotlib.ticker as ticker
 
 # ページ設定
