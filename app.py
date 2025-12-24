@@ -80,7 +80,6 @@ with col1:
             break
         next_start_age = int(end_age_val) + 1
 
-    # ★ここがエラーの原因でした。正しくは if needs_rerun: です
     if needs_rerun:
         st.session_state.df_phases = temp_df
         st.rerun()
@@ -192,4 +191,26 @@ if st.button("シミュレーションを実行する", type="primary"):
         res_col4.metric("不調時", f"{int(bottom_10_res[-1]):,}万")
 
         fig, ax = plt.subplots(figsize=(10, 6))
+        # ★ここがエラーの原因でした。この行もtryの中に収まるようインデントを調整済みです。
         age_axis = np.arange(current_age, end_age + 1)
+        
+        for index, row in phases_data.iterrows():
+            if not pd.isna(row["収支(万円)"]) and row["収支(万円)"] < 0:
+                ax.axvspan(row["開始年齢"], row["終了年齢"], color='orange', alpha=0.1)
+
+        ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
+        ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
+        ax.plot(age_axis, top_10_res, color='green', linestyle='--', linewidth=1, label='好調')
+        ax.plot(age_axis, bottom_10_res, color='red', linestyle='--', linewidth=1, label='不調')
+        
+        ax.set_title("資産推移", fontsize=14)
+        ax.set_xlabel("年齢")
+        ax.set_ylabel("資産額 (万円)")
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.7)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
+        
+        st.pyplot(fig)
+
+    except Exception as e:
+        st.error(f"エラー: {e}")
