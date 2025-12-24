@@ -458,4 +458,72 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             if t_ages[-1] != end_age: t_ages.append(end_age)
             
             ranges = [
-                (90, 100, "上位 10%"), (80, 90, "11% - 20%"), (70, 80, "21% - 30%"), (60, 70, "3
+                (90, 100, "上位 10%"), (80, 90, "11% - 20%"), (70, 80, "21% - 30%"), (60, 70, "31% - 40%"),
+                (50, 60, "41% - 50% (中央)"), (40, 50, "51% - 60%"), (30, 40, "61% - 70%"), (20, 30, "71% - 80%"),
+                (10, 20, "81% - 90%"), (0, 10, "91% - 100% (下位)")
+            ]
+            
+            d_data = {"ランク": [r[2] for r in ranges]}
+            r_data = {"指標": ["単純計算", "積立元本"]}
+
+            for ta in t_ages:
+                col = f"{ta}歳"
+                idx = ta - current_age
+                vals = np.sort(simulation_results[:, idx])
+                col_vals = []
+                for s, e, _ in ranges:
+                    idx_s, idx_e = int(num_simulations * s / 100), int(num_simulations * e / 100)
+                    subset = vals[idx_s:idx_e]
+                    avg = np.mean(subset) if len(subset) > 0 else 0
+                    col_vals.append(f"{int(avg):,} 万円")
+                d_data[col] = col_vals
+                
+                c_vals = []
+                c_vals.append(f"{int(deterministic_assets[idx]):,} 万円" if idx < len(deterministic_assets) else "-")
+                c_vals.append(f"{int(principal_assets[idx]):,} 万円" if idx < len(principal_assets) else "-")
+                r_data[col] = c_vals
+
+            st.dataframe(pd.DataFrame(d_data), hide_index=True, use_container_width=True)
+            st.caption("👇 比較用データ")
+            st.dataframe(pd.DataFrame(r_data), hide_index=True, use_container_width=True)
+
+            # --- 表2: 教育費内訳 ---
+            st.divider()
+            st.subheader("🎓 教育費の内訳詳細")
+            edu_rows = []
+            grand_total = 0
+            c_totals = [0]*len(st.session_state.children_list)
+
+            for y in range(years + 1):
+                p_age = current_age + y
+                y_tot = 0
+                row = {"親の年齢": f"{p_age}歳"}
+                has = False
+                for i, child in enumerate(st.session_state.children_list):
+                    c_age = child["age"] + y
+                    stg = get_school_stage(c_age, child["course"])
+                    if stg:
+                        cost = EDU_COSTS[child["course"]][stg]
+                        y_tot += cost
+                        c_totals[i] += cost
+                        grand_total += cost
+                        sn = STAGE_NAMES.get(stg, stg)
+                        row[f"子供{i+1}"] = f"{c_age}歳({sn}): {cost}万"
+                        has = True
+                    else:
+                        row[f"子供{i+1}"] = "-"
+                if has:
+                    row["教育費合計"] = f"▲{y_tot}万円"
+                    edu_rows.append(row)
+            
+            if edu_rows:
+                total_row = {"親の年齢": "合計"}
+                for i, t in enumerate(c_totals): total_row[f"子供{i+1}"] = f"{t:,}万円"
+                total_row["教育費合計"] = f"{grand_total:,}万円"
+                edu_rows.append(total_row)
+                st.dataframe(pd.DataFrame(edu_rows), hide_index=True, use_container_width=True)
+            else:
+                st.info("教育費がかかる期間はありません。")
+
+    except Exception as e:
+        st.error(f"エラー: {e}")
