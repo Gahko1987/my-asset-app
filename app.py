@@ -53,13 +53,11 @@ STAGE_NAMES = {
 with st.expander("▼ 基本設定（ここをタップして変更）", expanded=True):
     col_b1, col_b2 = st.columns(2)
     
-    # --- 左カラム：基本情報 ---
     with col_b1:
         current_age = st.number_input("現在の年齢", 0, 100, 35, key="input_current_age")
         current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 500)
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
-    # --- 右カラム：投資設定 ---
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
         st.caption("""
@@ -97,12 +95,13 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         with h_col1:
             h_age = st.number_input("購入年齢", current_age, 100, current_age + 5)
             h_price = st.number_input("物件価格 (万円)", 0, 50000, 4000)
-            current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120)
         with h_col2:
             h_down = st.number_input("頭金 (万円)", 0, h_price, 500)
             h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
         with h_col3:
             h_years = st.number_input("返済期間 (年)", 1, 50, 35)
+            # ★ここへ移動（返済期間の下）
+            current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120, help="この金額が、購入後に収支からプラス（節約）されます")
         
         loan_principal = h_price - h_down
         start_pay_age = h_age
@@ -139,7 +138,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     else:
         st.caption("※ 住宅ローン計算は行いません。")
 
-    # --- 年金設定 (一番下に移動) ---
+    # --- 年金設定 ---
     st.markdown("---")
     st.markdown("##### 👴 年金設定")
     use_pension = st.checkbox("年金を考慮する", value=True)
