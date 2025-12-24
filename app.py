@@ -11,7 +11,8 @@ st.title("📊 資産＆ライフプラン シミュレーター")
 
 # --- サイドバー：基本設定 ---
 st.sidebar.header("基本設定")
-current_age = st.sidebar.number_input("現在の年齢", 20, 80, 39)
+# 年齢を変えたときに表も自動更新するため、キー(key)を指定
+current_age = st.sidebar.number_input("現在の年齢", 20, 80, 39, key="input_current_age")
 current_assets = st.sidebar.number_input("現在の資産 (万円)", 0, 50000, 2300)
 mean_return_pct = st.sidebar.slider("想定利回り (年率%)", 0.0, 10.0, 5.0, 0.1)
 risk_std_pct = st.sidebar.slider("リスク (標準偏差%)", 0.0, 30.0, 15.0, 0.5)
@@ -24,33 +25,63 @@ risk_std = risk_std_pct / 100
 inflation_rate = inflation_rate_pct / 100
 real_mean_return = mean_return - inflation_rate
 
-# --- メイン画面：詳細設定 ---
+# --- メイン画面 ---
 
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支 (年額)")
-    st.info("💡 「何歳まで」「いくら」を入力してください。開始年齢は自動でつながります。")
+    st.info("💡 「終了年齢」を変えると、次の「開始年齢」が自動でつながります。")
+
+    # --- 自動計算ロジック付きテーブル ---
     
-    # 初期データ（終了年齢と金額だけにする）
-    default_phases = [
-        {"終了年齢": 42, "収支(万円)": 900}, # 39歳〜42歳
-        {"終了年齢": 60, "収支(万円)": 400}, # 43歳〜60歳
-        {"終了年齢": 65, "収支(万円)": 100}, # 61歳〜65歳
-        {"終了年齢": 95, "収支(万円)": -300},# 66歳〜95歳
-    ]
-    df_phases = pd.DataFrame(default_phases)
-    
-    # 編集用テーブル（終了年齢でソートして表示）
+    # 1. 初回起動時にデフォルトデータを作る（session_stateに保存）
+    if "df_phases" not in st.session_state:
+        st.session_state.df_phases = pd.DataFrame([
+            {"開始年齢": 39, "終了年齢": 42, "収支(万円)": 900},
+            {"開始年齢": 43, "終了年齢": 60, "収支(万円)": 400},
+            {"開始年齢": 61, "終了年齢": 65, "収支(万円)": 100},
+            {"開始年齢": 66, "終了年齢": 95, "収支(万円)": -300},
+        ])
+
+    # 2. テーブルを表示（開始年齢は編集不可にする）
     edited_phases = st.data_editor(
-        df_phases, 
+        st.session_state.df_phases,
         num_rows="dynamic",
+        key="phases_editor",
         column_config={
-            "終了年齢": st.column_config.NumberColumn(min_value=current_age, max_value=120, format="%d歳"),
+            "開始年齢": st.column_config.NumberColumn(disabled=True, format="%d歳"), # 編集不可
+            "終了年齢": st.column_config.NumberColumn(min_value=0, max_value=120, format="%d歳"),
             "収支(万円)": st.column_config.NumberColumn(format="%d万円")
         },
         use_container_width=True
     )
+
+    # 3. 自動修正ロジック（ここがポイント！）
+    # ユーザーが「終了年齢」を変えたら、瞬時に「開始年齢」を再計算して画面を更新する
+    needs_rerun = False
+    temp_df = edited_phases.copy()
+    
+    # 現在の年齢からスタート
+    next_start_age = current_age
+    
+    # 上から順に「開始年齢」を正しい値に書き換えていく
+    for i in range(len(temp_df)):
+        # もし開始年齢がズレていたら修正
+        if temp_df.at[i, "開始年齢"] != next_start_age:
+            temp_df.at[i, "開始年齢"] = next_start_age
+            needs_rerun = True
+        
+        # 次の行のスタート年齢を計算（終了年齢 + 1）
+        end_age_val = temp_df.at[i, "終了年齢"]
+        if pd.isna(end_age_val): # 入力中は計算しない
+            break
+        next_start_age = int(end_age_val) + 1
+
+    # 修正が必要な場合、データを保存して再読み込み
+    if needs_rerun:
+        st.session_state.df_phases = temp_df
+        st.rerun()
 
 with col2:
     st.subheader("2. イベント・一時金")
@@ -66,39 +97,27 @@ with col2:
 # --- シミュレーション実行 ---
 if st.button("シミュレーションを実行する", type="primary"):
     try:
-        # データ整理：終了年齢が若い順に並べ替え
-        sorted_phases = edited_phases.sort_values("終了年齢")
+        # 計算用データの準備
+        # 自動修正済みのデータ(temp_df)を使うので、整合性は完璧です
+        phases_data = st.session_state.df_phases.copy()
         
-        # 最終的な終了年齢（一番下の行の年齢）を取得
-        if sorted_phases.empty:
+        # 最終年齢の決定
+        if phases_data.empty:
              end_age = 95
         else:
-             end_age = int(sorted_phases["終了年齢"].max())
+             end_age = int(phases_data["終了年齢"].max())
 
         years = end_age - current_age
         simulation_results = np.zeros((num_simulations, years + 1))
         
-        # 収支マップの作成（ここが自動計算のキモ！）
+        # 収支マップの作成
         cashflow_map = {}
-        temp_current_age = current_age # スタート地点
-        
-        for index, row in sorted_phases.iterrows():
-            if pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
+        for index, row in phases_data.iterrows():
+            if pd.isna(row["開始年齢"]) or pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
                 continue
-                
-            phase_end_age = int(row["終了年齢"])
-            amount = row["収支(万円)"]
-            
-            # 設定された終了年齢が、現在の年齢より過去ならスキップ
-            if phase_end_age < temp_current_age:
-                continue
-            
-            # 期間を塗りつぶす（temp_current_age から phase_end_age まで）
-            for a in range(temp_current_age, phase_end_age + 1):
-                cashflow_map[a] = amount
-            
-            # 次の期間のスタート地点を更新
-            temp_current_age = phase_end_age + 1
+            start, end, amount = int(row["開始年齢"]), int(row["終了年齢"]), row["収支(万円)"]
+            for age in range(start, end + 1):
+                cashflow_map[age] = amount
 
         # イベントマップの作成
         event_map = {}
@@ -114,7 +133,6 @@ if st.button("シミュレーションを実行する", type="primary"):
             for year in range(years):
                 age = current_age + year
                 
-                # 自動計算したマップから収支を取得
                 annual_flow = cashflow_map.get(age, 0)
                 spot_flow = event_map.get(age, 0)
                 
@@ -146,10 +164,10 @@ if st.button("シミュレーションを実行する", type="primary"):
         age_axis = np.arange(current_age, end_age + 1)
         
         # 老後エリア（マイナス収支の期間）を色付け
-        # 簡易的に66歳以降を老後とするか、収支がマイナスの期間を探す
-        retirement_start = 66
-        if retirement_start <= end_age:
-            ax.axvspan(retirement_start, end_age, color='orange', alpha=0.1, label='老後期間(66歳~)')
+        # 単純に「収支がマイナス設定されている期間」を塗るロジックに変更
+        for index, row in phases_data.iterrows():
+            if row["収支(万円)"] < 0:
+                ax.axvspan(row["開始年齢"], row["終了年齢"], color='orange', alpha=0.1)
 
         ax.plot(age_axis, median_res, color='blue', linewidth=3, label='中央値')
         ax.plot(age_axis, top_10_res, color='green', linestyle='--', label='好調 (上位10%)')
