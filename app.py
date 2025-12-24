@@ -100,7 +100,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
         with h_col3:
             h_years = st.number_input("返済期間 (年)", 1, 50, 35)
-            # ★ここへ移動（返済期間の下）
+            # 現在の家賃（返済期間の下へ配置）
             current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120, help="この金額が、購入後に収支からプラス（節約）されます")
         
         loan_principal = h_price - h_down
@@ -215,7 +215,13 @@ with col1:
             new_end = st.number_input(f"何歳まで？ (第{i+1}期間)", min_value=min_val, max_value=150, value=current_end_val, key=f"phase_end_{i}")
             st.session_state.phases_list[i]["end"] = new_end
         with c_p2:
-            new_amount = st.number_input(f"年間の収支 (万円)", value=int(phase["amount"]), key=f"phase_amount_{i}")
+            # ★ここにformat='%+d'を追加して、プラス記号を表示
+            new_amount = st.number_input(
+                f"年間の収支 (万円)", 
+                value=int(phase["amount"]), 
+                format="%+d", 
+                key=f"phase_amount_{i}"
+            )
             st.session_state.phases_list[i]["amount"] = new_amount
         start_age_tracker = new_end + 1
         st.markdown("---")
