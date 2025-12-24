@@ -17,9 +17,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     col_b1, col_b2 = st.columns(2)
     
     with col_b1:
-        # 初期値：20歳
         current_age = st.number_input("現在の年齢", 0, 100, 20, key="input_current_age")
-        # 初期値：300万円
         current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 300)
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
@@ -36,19 +34,19 @@ real_mean_return = mean_return - inflation_rate
 st.divider()
 
 # ==========================================
-# データ管理用ロジック（追加・削除機能）
+# データ管理用ロジック
 # ==========================================
 
 # 1. ライフステージの初期データ
 if "phases_list" not in st.session_state:
     st.session_state.phases_list = [
-        {"end": 30, "amount": 100},   # 20代
-        {"end": 60, "amount": 400},   # 30代〜
-        {"end": 65, "amount": 100},   # 再雇用
-        {"end": 100, "amount": -300}, # 老後
+        {"end": 30, "amount": 100},
+        {"end": 60, "amount": 400},
+        {"end": 65, "amount": 100},
+        {"end": 100, "amount": -300},
     ]
 
-# 2. イベントの初期データ（★ここを変更しました）
+# 2. イベントの初期データ
 if "events_list" not in st.session_state:
     st.session_state.events_list = [
         {"age": 60, "amount": 2000, "name": "退職金"},
@@ -57,7 +55,6 @@ if "events_list" not in st.session_state:
 
 # ボタン操作のコールバック関数
 def add_phase():
-    # 最後の期間の終了年齢+5歳をデフォルトにする
     if st.session_state.phases_list:
         last_end = st.session_state.phases_list[-1]["end"]
     else:
@@ -79,12 +76,11 @@ def remove_event(index):
 # ==========================================
 col1, col2 = st.columns(2)
 
-# === 左側：ライフステージ入力（期間追加式） ===
+# === 左側：ライフステージ入力 ===
 with col1:
     st.subheader("1. ライフステージ収支")
     st.info("期間を追加・削除して、人生の収支計画を立てましょう。")
 
-    # 期間のリストを表示
     start_age_tracker = current_age
     
     for i, phase in enumerate(st.session_state.phases_list):
@@ -92,18 +88,27 @@ with col1:
         
         c_p1, c_p2 = st.columns([1, 1])
         with c_p1:
-            # 終了年齢の入力
+            # ★エラー修正ポイント★
+            # 現在の「開始年齢」よりも「保存されている終了年齢」が小さくなってしまった場合、
+            # 強制的に「開始年齢」と同じ値に修正してエラーを防ぐ
+            min_val = start_age_tracker
+            current_end_val = int(phase["end"])
+            
+            if current_end_val < min_val:
+                current_end_val = min_val
+                # 内部データも更新しておく
+                st.session_state.phases_list[i]["end"] = current_end_val
+
             new_end = st.number_input(
                 f"何歳まで？ (第{i+1}期間)",
-                min_value=start_age_tracker, 
+                min_value=min_val,  # ここが start_age_tracker
                 max_value=150,
-                value=int(phase["end"]),
+                value=current_end_val, # 修正済みの値を使う
                 key=f"phase_end_{i}"
             )
             st.session_state.phases_list[i]["end"] = new_end
             
         with c_p2:
-            # 金額の入力
             new_amount = st.number_input(
                 f"年間の収支 (万円)",
                 value=int(phase["amount"]),
@@ -111,11 +116,9 @@ with col1:
             )
             st.session_state.phases_list[i]["amount"] = new_amount
         
-        # 次の期間の開始年齢を更新
         start_age_tracker = new_end + 1
         st.markdown("---")
 
-    # 追加・削除ボタン
     b_col1, b_col2 = st.columns(2)
     with b_col1:
         st.button("➕ 期間を追加", on_click=add_phase, use_container_width=True)
@@ -123,12 +126,11 @@ with col1:
         st.button("🗑️ 最後の期間を削除", on_click=remove_phase, use_container_width=True)
 
 
-# === 右側：イベント入力（リスト追加式） ===
+# === 右側：イベント入力 ===
 with col2:
     st.subheader("2. イベント・一時金")
     st.caption("イベントを好きなだけ追加できます。")
 
-    # イベントリスト表示
     for i, event in enumerate(st.session_state.events_list):
         with st.container(border=True):
             e_col1, e_col2 = st.columns([2, 1])
@@ -141,7 +143,12 @@ with col2:
             
             e_in1, e_in2, e_in3 = st.columns([1, 1, 1.5])
             with e_in1:
-                new_age = st.number_input("年齢", min_value=0, max_value=150, value=int(event["age"]), key=f"ev_age_{i}")
+                # イベントも年齢矛盾でエラーにならないよう安全策をとる
+                ev_val = int(event["age"])
+                # マイナス年齢などは0にする
+                if ev_val < 0: ev_val = 0
+                
+                new_age = st.number_input("年齢", min_value=0, max_value=150, value=ev_val, key=f"ev_age_{i}")
                 st.session_state.events_list[i]["age"] = new_age
             with e_in2:
                 new_amt = st.number_input("金額(万円)", value=int(event["amount"]), key=f"ev_amt_{i}")
@@ -158,7 +165,6 @@ st.divider()
 if st.button("シミュレーションを実行する (10,000回)", type="primary"):
     
     try:
-        # 最終的な終了年齢を取得
         if st.session_state.phases_list:
             end_age = st.session_state.phases_list[-1]["end"]
         else:
@@ -171,7 +177,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
         else:
             num_simulations = 10000 
             
-            # 収支マップ作成
             cashflow_map = {}
             temp_start = current_age
             for p in st.session_state.phases_list:
@@ -183,7 +188,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[age] = amount_val
                 temp_start = end_val + 1
 
-            # イベントマップ作成
             event_map = {}
             for e in st.session_state.events_list:
                 age = int(e["age"])
@@ -248,7 +252,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
-            # 老後エリア（マイナス収支の期間）の色付け
+            # 色付け
             temp_start = current_age
             for p in st.session_state.phases_list:
                 end_val = int(p["end"])
