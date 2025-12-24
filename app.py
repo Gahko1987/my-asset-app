@@ -17,9 +17,9 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     col_b1, col_b2 = st.columns(2)
     
     with col_b1:
-        # ★初期値を変更：20歳
+        # 初期値：20歳
         current_age = st.number_input("現在の年齢", 0, 100, 20, key="input_current_age")
-        # ★初期値を変更：300万円
+        # 初期値：300万円
         current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 300)
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
@@ -39,20 +39,20 @@ st.divider()
 # データ管理用ロジック（追加・削除機能）
 # ==========================================
 
-# 1. ライフステージの初期データ（20歳向けに調整）
+# 1. ライフステージの初期データ
 if "phases_list" not in st.session_state:
     st.session_state.phases_list = [
-        {"end": 30, "amount": 100},   # 20代：少しずつ貯金
-        {"end": 60, "amount": 400},   # 30代〜：本格的に貯金
-        {"end": 65, "amount": 100},   # 再雇用期間
+        {"end": 30, "amount": 100},   # 20代
+        {"end": 60, "amount": 400},   # 30代〜
+        {"end": 65, "amount": 100},   # 再雇用
         {"end": 100, "amount": -300}, # 老後
     ]
 
-# 2. イベントの初期データ（20歳向けに調整）
+# 2. イベントの初期データ（★ここを変更しました）
 if "events_list" not in st.session_state:
     st.session_state.events_list = [
-        {"age": 30, "amount": -500, "name": "結婚・住宅頭金"},
         {"age": 60, "amount": 2000, "name": "退職金"},
+        {"age": 30, "amount": -300, "name": "車購入"},
     ]
 
 # ボタン操作のコールバック関数
@@ -166,7 +166,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             
         years = end_age - current_age
         
-        # エラー回避：もし終了年齢が現在年齢以下なら警告
         if years <= 0:
             st.error(f"エラー：終了年齢({end_age}歳)は、現在の年齢({current_age}歳)より未来に設定してください。")
         else:
