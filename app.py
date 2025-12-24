@@ -20,15 +20,8 @@ EDU_COSTS = {
     "vocational": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "vocational_school": 130 },
     "junior_college": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "junior_college": 120 },
     "high_school_grad": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52 },
-    # ★追加コース
-    "medical_private": { # 私立医学部 (6年)
-        "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, 
-        "medical_uni": 500 # 学費平均(年500万×6年=3000万想定)
-    },
-    "study_abroad": { # 海外留学 (4年)
-        "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, 
-        "overseas_uni": 700 # 学費+生活費(年700万想定・円安考慮)
-    }
+    "medical_private": { "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, "medical_uni": 500 },
+    "study_abroad": { "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, "overseas_uni": 700 }
 }
 
 def get_school_stage(age, course_type):
@@ -38,17 +31,10 @@ def get_school_stage(age, course_type):
     if 15 <= age <= 17: return "high_school"
     
     # 18歳以降の分岐
-    
-    # 医学部 (18〜23歳: 6年間)
-    if 18 <= age <= 23 and course_type == "medical_private":
-        return "medical_uni"
-        
-    # 一般大学・海外大 (18〜21歳: 4年間)
+    if 18 <= age <= 23 and course_type == "medical_private": return "medical_uni"
     if 18 <= age <= 21:
         if course_type in ["all_public", "private_uni", "all_private"]: return "university"
         if course_type == "study_abroad": return "overseas_uni"
-        
-    # 短大・専門 (18〜19歳: 2年間)
     if 18 <= age <= 19:
         if course_type == "vocational": return "vocational_school"
         if course_type == "junior_college": return "junior_college"
@@ -246,7 +232,6 @@ with col2:
                 new_age = st.number_input("現在の年齢", 0, 30, int(child["age"]), key=f"child_age_{i}")
                 st.session_state.children_list[i]["age"] = new_age
             with c_in2:
-                # ★選択肢を追加
                 course_opts = {
                     "all_public": "国公立大 (標準)", 
                     "private_uni": "私立大学 (平均)", 
