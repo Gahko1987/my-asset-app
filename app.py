@@ -19,7 +19,16 @@ EDU_COSTS = {
     "all_private": { "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, "university": 172 },
     "vocational": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "vocational_school": 130 },
     "junior_college": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "junior_college": 120 },
-    "high_school_grad": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52 }
+    "high_school_grad": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52 },
+    # ★追加コース
+    "medical_private": { # 私立医学部 (6年)
+        "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, 
+        "medical_uni": 500 # 学費平均(年500万×6年=3000万想定)
+    },
+    "study_abroad": { # 海外留学 (4年)
+        "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, 
+        "overseas_uni": 700 # 学費+生活費(年700万想定・円安考慮)
+    }
 }
 
 def get_school_stage(age, course_type):
@@ -27,15 +36,29 @@ def get_school_stage(age, course_type):
     if 6 <= age <= 11: return "elementary"
     if 12 <= age <= 14: return "junior_high"
     if 15 <= age <= 17: return "high_school"
+    
+    # 18歳以降の分岐
+    
+    # 医学部 (18〜23歳: 6年間)
+    if 18 <= age <= 23 and course_type == "medical_private":
+        return "medical_uni"
+        
+    # 一般大学・海外大 (18〜21歳: 4年間)
     if 18 <= age <= 21:
         if course_type in ["all_public", "private_uni", "all_private"]: return "university"
-        if course_type == "vocational" and age <= 19: return "vocational_school"
-        if course_type == "junior_college" and age <= 19: return "junior_college"
+        if course_type == "study_abroad": return "overseas_uni"
+        
+    # 短大・専門 (18〜19歳: 2年間)
+    if 18 <= age <= 19:
+        if course_type == "vocational": return "vocational_school"
+        if course_type == "junior_college": return "junior_college"
+        
     return None
 
 STAGE_NAMES = {
     "kindergarten": "幼", "elementary": "小", "junior_high": "中", 
-    "high_school": "高", "university": "大", "vocational_school": "専", "junior_college": "短"
+    "high_school": "高", "university": "大", "vocational_school": "専", "junior_college": "短",
+    "medical_uni": "医", "overseas_uni": "留"
 }
 
 # ==========================================
@@ -77,7 +100,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         - 🏛 **NASDAQ**: 23% 〜 28%
         """)
 
-    # ★住宅ローン設定 (修正版: 完済後改善ロジック用)
+    # ★住宅ローン設定
     st.markdown("---")
     st.markdown("##### 🏠 住宅・ローン設定")
     
@@ -95,8 +118,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         with h_col1:
             h_age = st.number_input("購入年齢", current_age, 100, current_age + 5)
             h_price = st.number_input("物件価格 (万円)", 0, 50000, 4000)
-            # ★追加: 現在の家賃（これが浮く計算にするため）
-            current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120, help="この金額が、購入後に収支からプラス（節約）されます")
+            current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120)
         with h_col2:
             h_down = st.number_input("頭金 (万円)", 0, h_price, 500)
             h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
@@ -112,14 +134,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             n = h_years * 12
             monthly_pmt = loan_principal * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else loan_principal / n
             annual_pmt = monthly_pmt * 12
-            
-            housing_info = {
-                "type": "future",
-                "annual_pmt": annual_pmt,
-                "start_age": start_pay_age,
-                "end_age": end_pay_age,
-                "current_rent_saved": current_rent_val
-            }
+            housing_info = {"type": "future", "annual_pmt": annual_pmt, "start_age": start_pay_age, "end_age": end_pay_age, "current_rent_saved": current_rent_val}
             st.info(f"📅 **計画**: {start_pay_age}歳で購入。以降、家賃{current_rent_val}万が浮き、ローン{int(annual_pmt)}万を支払います。完済({end_pay_age}歳)後は住居費負担がなくなります。")
 
     elif housing_option == "すでに購入済み (ローン返済中)":
@@ -139,14 +154,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             n = h_years_remain * 12
             monthly_pmt = loan_principal * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else loan_principal / n
             annual_pmt = monthly_pmt * 12
-            
-            housing_info = {
-                "type": "already",
-                "annual_pmt": annual_pmt,
-                "start_age": start_pay_age,
-                "end_age": end_pay_age,
-                "current_rent_saved": 0
-            }
+            housing_info = {"type": "already", "annual_pmt": annual_pmt, "start_age": start_pay_age, "end_age": end_pay_age, "current_rent_saved": 0}
             st.info(f"📅 **計画**: {end_pay_age}歳で完済予定。以降、年間 約{int(annual_pmt):,}万円 の収支が改善します。")
 
     else:
@@ -204,7 +212,6 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支")
-    # ★案内文を変更
     st.info("💡 **現在の住居費（家賃やローン返済額）を含んだ**、年間の収支を入力してください。")
     start_age_tracker = current_age
     for i, phase in enumerate(st.session_state.phases_list):
@@ -239,7 +246,17 @@ with col2:
                 new_age = st.number_input("現在の年齢", 0, 30, int(child["age"]), key=f"child_age_{i}")
                 st.session_state.children_list[i]["age"] = new_age
             with c_in2:
-                course_opts = {"all_public": "国公立大 (標準)", "private_uni": "私立大学 (平均)", "all_private": "すべて私立 (手厚い)", "vocational": "専門学校 (2年)", "junior_college": "短期大学 (2年)", "high_school_grad": "高校卒業まで"}
+                # ★選択肢を追加
+                course_opts = {
+                    "all_public": "国公立大 (標準)", 
+                    "private_uni": "私立大学 (平均)", 
+                    "all_private": "すべて私立 (手厚い)", 
+                    "medical_private": "私立医学部 (6年)",
+                    "study_abroad": "海外大学留学 (4年)",
+                    "vocational": "専門学校 (2年)", 
+                    "junior_college": "短期大学 (2年)", 
+                    "high_school_grad": "高校卒業まで"
+                }
                 current_c = child["course"] if child["course"] in course_opts else "private_uni"
                 new_course = st.selectbox("進学コース", options=list(course_opts.keys()), format_func=lambda x: course_opts[x], index=list(course_opts.keys()).index(current_c), key=f"child_course_{i}")
                 st.session_state.children_list[i]["course"] = new_course
@@ -305,30 +322,20 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
-            # 3. 年金 & 住宅ローン (★ロジック変更)
+            # 3. 年金 & 住宅ローン
             for y in range(years + 1):
                 age = current_age + y
                 
-                # 年金
                 if use_pension and age >= pension_start_age:
                     cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
                 
-                # 住宅ローン調整
                 if housing_info["type"] == "already":
-                    # 「すでに購入」の場合: 
-                    # 完済までは入力通り。完済後(age > end_age)は、ローン返済額分が浮くのでプラス。
                     if age > housing_info["end_age"]:
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["annual_pmt"]
                 
                 elif housing_info["type"] == "future":
-                    # 「これから購入」の場合:
-                    # 購入前(age < start): 入力通り(家賃)。
-                    # 返済中(start <= age <= end): 家賃が浮く(+rent) が、ローンを払う(-loan)。
-                    # 完済後(age > end): 家賃が浮く(+rent) が、ローンはない(0)。つまり大幅改善。
                     if age >= housing_info["start_age"]:
-                        # まず家賃負担がなくなる分をプラス
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"]
-                        # ローン返済期間ならマイナス
                         if age <= housing_info["end_age"]:
                             cashflow_map[age] = cashflow_map.get(age, 0) - housing_info["annual_pmt"]
 
@@ -347,7 +354,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 flow = cashflow_map.get(age, 0)
                 spot = event_map.get(age, 0)
                 
-                # A: 単純計算
                 prev_d = deterministic_assets[-1]
                 if prev_d <= 0: new_d = 0
                 else:
@@ -355,7 +361,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     if new_d < 0: new_d = 0
                 deterministic_assets.append(new_d)
                 
-                # B: 積立元本
                 prev_p = principal_assets[-1]
                 new_p = prev_p + flow + spot
                 if new_p < 0: new_p = 0
@@ -412,7 +417,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
-            # 色分け
             for age, cost in education_cost_map.items():
                 if cost > 0: ax.axvspan(age, age+1, color='cyan', alpha=0.1)
             
@@ -421,7 +425,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 flow = cashflow_map.get(age, 0)
                 if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
                 
-                # 住宅ローン期間 (紫)
                 if housing_info["type"] != "none":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                          ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
@@ -455,72 +458,4 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             if t_ages[-1] != end_age: t_ages.append(end_age)
             
             ranges = [
-                (90, 100, "上位 10%"), (80, 90, "11% - 20%"), (70, 80, "21% - 30%"), (60, 70, "31% - 40%"),
-                (50, 60, "41% - 50% (中央)"), (40, 50, "51% - 60%"), (30, 40, "61% - 70%"), (20, 30, "71% - 80%"),
-                (10, 20, "81% - 90%"), (0, 10, "91% - 100% (下位)")
-            ]
-            
-            d_data = {"ランク": [r[2] for r in ranges]}
-            r_data = {"指標": ["単純計算", "積立元本"]}
-
-            for ta in t_ages:
-                col = f"{ta}歳"
-                idx = ta - current_age
-                vals = np.sort(simulation_results[:, idx])
-                col_vals = []
-                for s, e, _ in ranges:
-                    idx_s, idx_e = int(num_simulations * s / 100), int(num_simulations * e / 100)
-                    subset = vals[idx_s:idx_e]
-                    avg = np.mean(subset) if len(subset) > 0 else 0
-                    col_vals.append(f"{int(avg):,} 万円")
-                d_data[col] = col_vals
-                
-                c_vals = []
-                c_vals.append(f"{int(deterministic_assets[idx]):,} 万円" if idx < len(deterministic_assets) else "-")
-                c_vals.append(f"{int(principal_assets[idx]):,} 万円" if idx < len(principal_assets) else "-")
-                r_data[col] = c_vals
-
-            st.dataframe(pd.DataFrame(d_data), hide_index=True, use_container_width=True)
-            st.caption("👇 比較用データ")
-            st.dataframe(pd.DataFrame(r_data), hide_index=True, use_container_width=True)
-
-            # --- 表2: 教育費内訳 ---
-            st.divider()
-            st.subheader("🎓 教育費の内訳詳細")
-            edu_rows = []
-            grand_total = 0
-            c_totals = [0]*len(st.session_state.children_list)
-
-            for y in range(years + 1):
-                p_age = current_age + y
-                y_tot = 0
-                row = {"親の年齢": f"{p_age}歳"}
-                has = False
-                for i, child in enumerate(st.session_state.children_list):
-                    c_age = child["age"] + y
-                    stg = get_school_stage(c_age, child["course"])
-                    if stg:
-                        cost = EDU_COSTS[child["course"]][stg]
-                        y_tot += cost
-                        c_totals[i] += cost
-                        grand_total += cost
-                        sn = STAGE_NAMES.get(stg, stg)
-                        row[f"子供{i+1}"] = f"{c_age}歳({sn}): {cost}万"
-                        has = True
-                    else:
-                        row[f"子供{i+1}"] = "-"
-                if has:
-                    row["教育費合計"] = f"▲{y_tot}万円"
-                    edu_rows.append(row)
-            
-            if edu_rows:
-                total_row = {"親の年齢": "合計"}
-                for i, t in enumerate(c_totals): total_row[f"子供{i+1}"] = f"{t:,}万円"
-                total_row["教育費合計"] = f"{grand_total:,}万円"
-                edu_rows.append(total_row)
-                st.dataframe(pd.DataFrame(edu_rows), hide_index=True, use_container_width=True)
-            else:
-                st.info("教育費がかかる期間はありません。")
-
-    except Exception as e:
-        st.error(f"エラー: {e}")
+                (90, 100, "上位 10%"), (80, 90, "11% - 20%"), (70, 80, "21% - 30%"), (60, 70, "3
