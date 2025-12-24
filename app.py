@@ -60,11 +60,24 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
 
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
-        st.caption("📈 目安: オルカン 5-8%, S&P500 7-10%")
+        st.caption("""
+        **📈 利回りの目安 (長期・円ベース)**
+        - 🇯🇵 **TOPIX**: 4% 〜 6%
+        - 🌏 **オルカン**: 5% 〜 8%
+        - 🇺🇸 **S&P500**: 7% 〜 10%
+        - 🏛 **NASDAQ**: 9% 〜 13%
+        """)
+        
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
-        st.caption("📊 目安: オルカン 17-20%, S&P500 19-23%")
+        st.caption("""
+        **📊 リスクの目安 (円ベース)**
+        - 🇯🇵 **TOPIX**: 15% 〜 18%
+        - 🌏 **オルカン**: 17% 〜 20%
+        - 🇺🇸 **S&P500**: 19% 〜 23%
+        - 🏛 **NASDAQ**: 23% 〜 28%
+        """)
 
-    # ★住宅ローン設定 (修正版: 3択ラジオボタン)
+    # ★住宅ローン設定
     st.markdown("---")
     st.markdown("##### 🏠 住宅・ローン設定")
     
@@ -91,7 +104,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         start_pay_age = h_age
         end_pay_age = h_age + h_years - 1
         
-        # 共通計算へ
         if loan_principal > 0:
             r = h_rate / 100 / 12
             n = h_years * 12
@@ -111,7 +123,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         start_pay_age = current_age
         end_pay_age = current_age + h_years_remain - 1
         
-        # 共通計算へ
         if loan_principal > 0:
             r = h_rate / 100 / 12
             n = h_years_remain * 12
@@ -121,7 +132,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             st.info(f"📅 **ローン返済**: {start_pay_age}歳〜{end_pay_age}歳まで、年額 約{int(annual_pmt):,}万円")
 
     else:
-        # "考慮しない" が選ばれた場合
         st.caption("※ 住宅ローン計算は行いません（家賃などは「ライフステージ収支」に入力してください）。")
 
 
@@ -395,7 +405,11 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
             
-            st.caption("🟦 **水色背景**: 教育費負担期間 / 🟧 **オレンジ背景**: 赤字期間")
+            # ★復活させた緑色の説明
+            st.caption("※ グラフ背景の色について：")
+            st.caption("🟦 **水色**: 教育費がかかる期間")
+            st.caption("🟧 **オレンジ**: 収支が赤字（貯金取崩し）の期間")
+            st.caption("🟩 **緑色**: 上記2つが重なっている期間（教育費負担があり、かつ赤字の期間）")
             st.caption("🟪 **紫の帯(下部)**: 住宅ローン返済期間")
 
             st.divider()
