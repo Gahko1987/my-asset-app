@@ -298,16 +298,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             
             st.pyplot(fig)
 
-            # --- 結果表示3: 分布テーブル ---
             st.divider()
+
+            # --- 結果表示3: 分布テーブル（10歳刻み） ---
             st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
-            st.caption("各年齢ごとの上位〜下位グループの平均資産額を表示します。")
+            st.caption("シミュレーション結果のバラつき（上位〜下位）を表示します。")
 
             step_years = 10
             target_ages = list(range(current_age, end_age + 1, step_years))
             if target_ages[-1] != end_age:
                 target_ages.append(end_age)
             
+            # --- 表1: 確率分布（パーセンタイル） ---
             percentile_ranges = [
                 (90, 100, "上位 10%"),
                 (80, 90, "11% - 20%"),
@@ -321,20 +323,16 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 (0, 10, "91% - 100%")
             ]
             
-            # 行ラベルの作成（ランク + 単純計算 + 積立元本）
-            row_labels = [label for _, _, label in percentile_ranges]
-            row_labels.append("単純計算 (リスクなし)")
-            row_labels.append("積立元本 (投資なし)")
-            
-            table_data = {"ランク": row_labels}
-            
+            dist_data = {"ランク": [label for _, _, label in percentile_ranges]}
+            ref_data = {"指標": ["単純計算 (リスクなし)", "積立元本 (投資なし)"]}
+
             for target_age in target_ages:
+                col_name = f"{target_age}歳"
                 idx = target_age - current_age
                 assets_at_age = np.sort(simulation_results[:, idx])
                 
-                col_values = []
-                
-                # 1. ランクごとの値を計算
+                # 分布データの作成
+                dist_col = []
                 for p_start, p_end, _ in percentile_ranges:
                     slice_start = int(num_simulations * (p_start / 100))
                     slice_end = int(num_simulations * (p_end / 100))
@@ -344,26 +342,34 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         avg_val = np.mean(subset)
                     else:
                         avg_val = 0
-                    col_values.append(f"{int(avg_val):,} 万円")
+                    dist_col.append(f"{int(avg_val):,} 万円")
                 
-                # 2. 単純計算の値を追加
+                dist_data[col_name] = dist_col
+
+                # 参考データの作成
+                ref_col = []
+                # 単純計算
                 if idx < len(deterministic_assets):
                     val_simple = deterministic_assets[idx]
-                    col_values.append(f"{int(val_simple):,} 万円")
+                    ref_col.append(f"{int(val_simple):,} 万円")
                 else:
-                    col_values.append("-")
-
-                # 3. 積立元本の値を追加
+                    ref_col.append("-")
+                # 積立元本
                 if idx < len(principal_assets):
                     val_principal = principal_assets[idx]
-                    col_values.append(f"{int(val_principal):,} 万円")
+                    ref_col.append(f"{int(val_principal):,} 万円")
                 else:
-                    col_values.append("-")
+                    ref_col.append("-")
+                
+                ref_data[col_name] = ref_col
 
-                table_data[f"{target_age}歳"] = col_values
+            df_dist = pd.DataFrame(dist_data)
+            st.dataframe(df_dist, hide_index=True, use_container_width=True)
 
-            df_table = pd.DataFrame(table_data)
-            st.dataframe(df_table, hide_index=True, use_container_width=True)
+            # --- 表2: 参考データ（元本・理論値） ---
+            st.caption("👇 投資効果の比較用（リスクを含まない計算値）")
+            df_ref = pd.DataFrame(ref_data)
+            st.dataframe(df_ref, hide_index=True, use_container_width=True)
 
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
