@@ -53,20 +53,13 @@ STAGE_NAMES = {
 with st.expander("▼ 基本設定（ここをタップして変更）", expanded=True):
     col_b1, col_b2 = st.columns(2)
     
+    # --- 左カラム：基本情報 ---
     with col_b1:
         current_age = st.number_input("現在の年齢", 0, 100, 35, key="input_current_age")
         current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 500)
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
-        st.markdown("---")
-        st.markdown("##### 👴 年金設定")
-        use_pension = st.checkbox("年金を考慮する", value=True)
-        if use_pension:
-            pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65)
-            pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240)
-        else:
-            pension_start_age = 65; pension_annual = 0
-
+    # --- 右カラム：投資設定 ---
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
         st.caption("""
@@ -86,7 +79,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         - 🏛 **NASDAQ**: 23% 〜 28%
         """)
 
-    # ★住宅ローン設定
+    # --- 住宅ローン設定 ---
     st.markdown("---")
     st.markdown("##### 🏠 住宅・ローン設定")
     
@@ -145,6 +138,19 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
 
     else:
         st.caption("※ 住宅ローン計算は行いません。")
+
+    # --- 年金設定 (一番下に移動) ---
+    st.markdown("---")
+    st.markdown("##### 👴 年金設定")
+    use_pension = st.checkbox("年金を考慮する", value=True)
+    if use_pension:
+        p_col1, p_col2 = st.columns(2)
+        with p_col1:
+            pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65)
+        with p_col2:
+            pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240)
+    else:
+        pension_start_age = 65; pension_annual = 0
 
 
 # 計算用数値
