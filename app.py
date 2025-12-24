@@ -17,14 +17,17 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     col_b1, col_b2 = st.columns(2)
     
     with col_b1:
-        # 年齢：初期値 20歳
-        current_age = st.number_input("現在の年齢", 18, 80, 20, key="input_current_age")
-        # 資産：初期値 500万円
-        current_assets = st.number_input("現在の資産 (万円)", 0, 50000, 500)
+        # 年齢
+        current_age = st.number_input("現在の年齢", 0, 100, 39, key="input_current_age")
+        # 資産
+        current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 2300)
+        # インフレ率
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
     with col_b2:
+        # 利回り
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 10.0, 5.0, 0.1)
+        # リスク
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 30.0, 15.0, 0.5)
 
 # %を小数に変換
@@ -33,114 +36,124 @@ risk_std = risk_std_pct / 100
 inflation_rate = inflation_rate_pct / 100
 real_mean_return = mean_return - inflation_rate
 
-# ==========================================
-# メイン画面レイアウト
-# ==========================================
 st.divider()
+
+# ==========================================
+# 入力エリア（表をやめて、分かりやすい入力フォームに変更）
+# ==========================================
 col1, col2 = st.columns(2)
 
-# === 左側（スマホでは上）：ライフステージ入力 ===
+# === 左側：ライフステージ入力 ===
 with col1:
     st.subheader("1. ライフステージ収支 (年額)")
-    st.info("💡 「終了年齢」を変えると期間が自動でつながります。")
+    st.info("人生を4つの期間に分けて、貯金額（または生活費）を設定します。")
 
-    # 初期データを「100歳まで」に設定
-    if "df_phases" not in st.session_state:
-        st.session_state.df_phases = pd.DataFrame([
-            {"開始年齢": 20, "終了年齢": 30, "収支(万円)": 100},
-            {"開始年齢": 31, "終了年齢": 60, "収支(万円)": 400},
-            {"開始年齢": 61, "終了年齢": 65, "収支(万円)": 100},
-            {"開始年齢": 66, "終了年齢": 100, "収支(万円)": -300},
-        ])
+    # --- 第1期間 ---
+    st.markdown("##### 🟢 第1期間 (現在 〜 )")
+    c1_1, c1_2 = st.columns([1, 1])
+    with c1_1:
+        phase1_end = st.number_input("何歳まで？ (第1期間)", min_value=current_age, max_value=120, value=42)
+    with c1_2:
+        phase1_save = st.number_input("年間の収支 (万円)", value=900, key="p1_save", help="プラスは貯金、マイナスは取り崩し")
 
-    edited_phases = st.data_editor(
-        st.session_state.df_phases,
-        num_rows="dynamic",
-        key="phases_editor",
-        column_config={
-            "開始年齢": st.column_config.NumberColumn(disabled=True, format="%d歳"),
-            "終了年齢": st.column_config.NumberColumn(min_value=0, max_value=120, format="%d歳"),
-            "収支(万円)": st.column_config.NumberColumn(format="%d万円")
-        },
-        use_container_width=True
-    )
+    # --- 第2期間 ---
+    st.markdown(f"##### 🔵 第2期間 ({phase1_end + 1}歳 〜 )")
+    c2_1, c2_2 = st.columns([1, 1])
+    with c2_1:
+        phase2_end = st.number_input("何歳まで？ (第2期間)", min_value=phase1_end+1, max_value=120, value=60)
+    with c2_2:
+        phase2_save = st.number_input("年間の収支 (万円)", value=400, key="p2_save")
 
-    # 自動修正ロジック
-    needs_rerun = False
-    temp_df = edited_phases.copy()
-    next_start_age = current_age
-    
-    for i in range(len(temp_df)):
-        if temp_df.at[i, "開始年齢"] != next_start_age:
-            temp_df.at[i, "開始年齢"] = next_start_age
-            needs_rerun = True
-        
-        end_age_val = temp_df.at[i, "終了年齢"]
-        if pd.isna(end_age_val):
-            break
-        next_start_age = int(end_age_val) + 1
+    # --- 第3期間 ---
+    st.markdown(f"##### 🟡 第3期間 ({phase2_end + 1}歳 〜 )")
+    c3_1, c3_2 = st.columns([1, 1])
+    with c3_1:
+        phase3_end = st.number_input("何歳まで？ (第3期間)", min_value=phase2_end+1, max_value=120, value=65)
+    with c3_2:
+        phase3_save = st.number_input("年間の収支 (万円)", value=100, key="p3_save")
 
-    if needs_rerun:
-        st.session_state.df_phases = temp_df
-        st.rerun()
+    # --- 第4期間 ---
+    st.markdown(f"##### 🟠 第4期間 ({phase3_end + 1}歳 〜 )")
+    c4_1, c4_2 = st.columns([1, 1])
+    with c4_1:
+        phase4_end = st.number_input("何歳まで？ (第4期間)", min_value=phase3_end+1, max_value=120, value=100)
+    with c4_2:
+        phase4_save = st.number_input("年間の収支 (万円)", value=-300, key="p4_save")
 
-# === 右側（スマホでは下）：イベント入力 ===
+    # データをまとめる
+    phases_list = [
+        {"start": current_age, "end": phase1_end, "amount": phase1_save},
+        {"start": phase1_end + 1, "end": phase2_end, "amount": phase2_save},
+        {"start": phase2_end + 1, "end": phase3_end, "amount": phase3_save},
+        {"start": phase3_end + 1, "end": phase4_end, "amount": phase4_save},
+    ]
+
+# === 右側：イベント入力 ===
 with col2:
     st.subheader("2. イベント・一時金")
-    st.caption("退職金(プラス)や大きな買い物(マイナス)")
-    
-    default_events = [
-        {"年齢": 60, "金額(万円)": 2000, "内容": "退職金"},
-        {"年齢": 30, "金額(万円)": -500, "内容": "結婚・住宅頭金など"},
-    ]
-    if "df_events_init" not in st.session_state:
-        st.session_state.df_events_init = pd.DataFrame(default_events)
+    st.caption("退職金や家の購入など、大きな出費や収入を入力")
 
-    edited_events = st.data_editor(
-        st.session_state.df_events_init,
-        num_rows="dynamic",
-        use_container_width=True
-    )
+    # --- イベント1 ---
+    st.markdown("##### イベント 1")
+    e1_1, e1_2, e1_3 = st.columns([1, 1, 1.5])
+    with e1_1:
+        ev1_age = st.number_input("年齢", min_value=0, max_value=120, value=60, key="ev1_age")
+    with e1_2:
+        ev1_amount = st.number_input("金額(万円)", value=2000, key="ev1_amount")
+    with e1_3:
+        ev1_name = st.text_input("内容", value="退職金", key="ev1_name")
+
+    # --- イベント2 ---
+    st.markdown("##### イベント 2")
+    e2_1, e2_2, e2_3 = st.columns([1, 1, 1.5])
+    with e2_1:
+        ev2_age = st.number_input("年齢", min_value=0, max_value=120, value=55, key="ev2_age")
+    with e2_2:
+        ev2_amount = st.number_input("金額(万円)", value=-300, key="ev2_amount")
+    with e2_3:
+        ev2_name = st.text_input("内容", value="車の購入", key="ev2_name")
+
+    # --- イベント3 ---
+    st.markdown("##### イベント 3")
+    e3_1, e3_2, e3_3 = st.columns([1, 1, 1.5])
+    with e3_1:
+        ev3_age = st.number_input("年齢", min_value=0, max_value=120, value=0, key="ev3_age")
+    with e3_2:
+        ev3_amount = st.number_input("金額(万円)", value=0, key="ev3_amount")
+    with e3_3:
+        ev3_name = st.text_input("内容", value="", key="ev3_name")
+
+    # イベントデータをまとめる
+    events_list = [
+        {"age": ev1_age, "amount": ev1_amount},
+        {"age": ev2_age, "amount": ev2_amount},
+        {"age": ev3_age, "amount": ev3_amount},
+    ]
 
 # --- シミュレーション実行ボタン ---
 st.divider()
 if st.button("シミュレーションを実行する (10,000回)", type="primary"):
     
     try:
-        # データ整理
-        phases_data = st.session_state.df_phases.copy()
-        if phases_data.empty:
-             end_age = 100
-        else:
-             valid_phases = phases_data.dropna(subset=["終了年齢"])
-             if valid_phases.empty:
-                 end_age = 100
-             else:
-                 end_age = int(valid_phases["終了年齢"].max())
-
+        # 計算ロジック
+        end_age = phase4_end
         years = end_age - current_age
-        
-        # 10,000回シミュレーション
         num_simulations = 10000 
         
+        # 収支マップ作成
         cashflow_map = {}
-        for index, row in phases_data.iterrows():
-            if pd.isna(row["開始年齢"]) or pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
-                continue
-            start, end, amount = int(row["開始年齢"]), int(row["終了年齢"]), row["収支(万円)"]
-            for age in range(start, end + 1):
-                cashflow_map[age] = amount
+        for p in phases_list:
+            start, end, amount = int(p["start"]), int(p["end"]), p["amount"]
+            if start <= end:
+                for age in range(start, end + 1):
+                    cashflow_map[age] = amount
 
+        # イベントマップ作成
         event_map = {}
-        for index, row in edited_events.iterrows():
-            if pd.isna(row["年齢"]) or pd.isna(row["金額(万円)"]):
-                continue
-            try:
-                age = int(row["年齢"])
-                amount = int(row["金額(万円)"])
+        for e in events_list:
+            age, amount = int(e["age"]), int(e["amount"])
+            if amount != 0: # 金額が0のイベントは無視
                 event_map[age] = event_map.get(age, 0) + amount
-            except:
-                continue
 
         # --- A. 単純計算 ---
         deterministic_assets = [current_assets]
@@ -160,16 +173,11 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
 
         # --- B. モンテカルロ ---
         simulation_results = np.zeros((num_simulations, years + 1))
-        
-        # 進捗バーを表示
         progress_bar = st.progress(0)
         
         for i in range(num_simulations):
             assets = [current_assets]
-            
-            # 100回ごとにバーを進める
-            if i % 100 == 0:
-                progress_bar.progress(i / num_simulations)
+            if i % 100 == 0: progress_bar.progress(i / num_simulations)
                 
             for year in range(years):
                 age = current_age + year
@@ -187,7 +195,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 assets.append(new_value)
             simulation_results[i, :] = assets
             
-        progress_bar.progress(1.0) # 完了
+        progress_bar.progress(1.0)
 
         # 結果表示
         median_res = np.percentile(simulation_results, 50, axis=0)
@@ -205,9 +213,10 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
         fig, ax = plt.subplots(figsize=(10, 6))
         age_axis = np.arange(current_age, end_age + 1)
         
-        for index, row in phases_data.iterrows():
-            if not pd.isna(row["収支(万円)"]) and row["収支(万円)"] < 0:
-                ax.axvspan(row["開始年齢"], row["終了年齢"], color='orange', alpha=0.1)
+        # 老後エリア（マイナス収支の期間）の色付け
+        for p in phases_list:
+            if p["amount"] < 0:
+                ax.axvspan(p["start"], p["end"], color='orange', alpha=0.1)
 
         ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
         ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
