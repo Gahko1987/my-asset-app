@@ -204,7 +204,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 amount = int(e["amount"])
                 event_map[age] = event_map.get(age, 0) + amount
 
-            # --- A. 単純計算 ---
+            # --- A. 単純計算 (リスクなし・利回りあり) ---
             deterministic_assets = [current_assets]
             for year in range(years):
                 age = current_age + year
@@ -220,7 +220,20 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     if new_value < 0: new_value = 0
                 deterministic_assets.append(new_value)
 
-            # --- B. モンテカルロ ---
+            # --- B. 積立元本 (投資なし・利回り0%) ---
+            principal_assets = [current_assets]
+            for year in range(years):
+                age = current_age + year
+                annual_flow = cashflow_map.get(age, 0)
+                spot_flow = event_map.get(age, 0)
+                
+                prev_val = principal_assets[-1]
+                # 利回りをかけず、収支を足すだけ
+                new_val = prev_val + annual_flow + spot_flow
+                if new_val < 0: new_val = 0
+                principal_assets.append(new_val)
+
+            # --- C. モンテカルロ ---
             simulation_results = np.zeros((num_simulations, years + 1))
             progress_bar = st.progress(0)
             
@@ -285,20 +298,16 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             
             st.pyplot(fig)
 
-            # --- 結果表示3: 分布テーブル（★新機能★） ---
+            # --- 結果表示3: 分布テーブル ---
             st.divider()
             st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
             st.caption("各年齢ごとの上位〜下位グループの平均資産額を表示します。")
 
-            # 10歳刻みの年齢リストを作成（現在、+10, +20... 終了年齢）
             step_years = 10
             target_ages = list(range(current_age, end_age + 1, step_years))
-            # 終了年齢が含まれていなければ追加
             if target_ages[-1] != end_age:
                 target_ages.append(end_age)
-            # 現在年齢が含まれていれば削除（0年後は現在資産そのままなので省略可だが、入れても良い。今回は入れる）
             
-            # テーブルの行ラベル（上位10%〜下位10%）
             percentile_ranges = [
                 (90, 100, "上位 10%"),
                 (80, 90, "11% - 20%"),
@@ -312,31 +321,21 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 (0, 10, "91% - 100%")
             ]
             
-            # データフレーム作成用の辞書
-            table_data = {"ランク": [label for _, _, label in percentile_ranges]}
+            # 行ラベルの作成（ランク + 単純計算 + 積立元本）
+            row_labels = [label for _, _, label in percentile_ranges]
+            row_labels.append("単純計算 (リスクなし)")
+            row_labels.append("積立元本 (投資なし)")
+            
+            table_data = {"ランク": row_labels}
             
             for target_age in target_ages:
-                # 配列のインデックス
                 idx = target_age - current_age
-                
-                # その年の全シミュレーション結果を取得してソート
                 assets_at_age = np.sort(simulation_results[:, idx])
                 
                 col_values = []
+                
+                # 1. ランクごとの値を計算
                 for p_start, p_end, _ in percentile_ranges:
-                    # p_start% 〜 p_end% の範囲のデータを抽出
-                    # np.percentileではなく、ソート済み配列のスライスで平均をとる
-                    # インデックス計算
-                    idx_start = int(num_simulations * (p_start / 100))
-                    idx_end = int(num_simulations * (p_end / 100))
-                    
-                    # 境界値の調整（配列外参照防止）
-                    if idx_end == num_simulations: idx_end -= 1
-                    if idx_start == num_simulations: idx_start -= 1
-                    
-                    # 範囲内の平均値を計算
-                    # スライスは [start:end] なので、p_startが0の場合は 0:1000 となる
-                    # numpyの仕様に合わせて調整
                     slice_start = int(num_simulations * (p_start / 100))
                     slice_end = int(num_simulations * (p_end / 100))
                     
@@ -345,12 +344,24 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         avg_val = np.mean(subset)
                     else:
                         avg_val = 0
-                    
                     col_values.append(f"{int(avg_val):,} 万円")
                 
+                # 2. 単純計算の値を追加
+                if idx < len(deterministic_assets):
+                    val_simple = deterministic_assets[idx]
+                    col_values.append(f"{int(val_simple):,} 万円")
+                else:
+                    col_values.append("-")
+
+                # 3. 積立元本の値を追加
+                if idx < len(principal_assets):
+                    val_principal = principal_assets[idx]
+                    col_values.append(f"{int(val_principal):,} 万円")
+                else:
+                    col_values.append("-")
+
                 table_data[f"{target_age}歳"] = col_values
 
-            # データフレーム表示
             df_table = pd.DataFrame(table_data)
             st.dataframe(df_table, hide_index=True, use_container_width=True)
 
