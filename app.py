@@ -204,7 +204,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 amount = int(e["amount"])
                 event_map[age] = event_map.get(age, 0) + amount
 
-            # --- A. 単純計算 (リスクなし・利回りあり) ---
+            # --- A. 単純計算 ---
             deterministic_assets = [current_assets]
             for year in range(years):
                 age = current_age + year
@@ -220,15 +220,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     if new_value < 0: new_value = 0
                 deterministic_assets.append(new_value)
 
-            # --- B. 積立元本 (投資なし・利回り0%) ---
+            # --- B. 積立元本 ---
             principal_assets = [current_assets]
             for year in range(years):
                 age = current_age + year
                 annual_flow = cashflow_map.get(age, 0)
                 spot_flow = event_map.get(age, 0)
-                
                 prev_val = principal_assets[-1]
-                # 利回りをかけず、収支を足すだけ
                 new_val = prev_val + annual_flow + spot_flow
                 if new_val < 0: new_val = 0
                 principal_assets.append(new_val)
@@ -265,15 +263,24 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             bottom_10_res = np.percentile(simulation_results, 10, axis=0)
             ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
 
-            # --- 結果表示1: サマリ ---
             st.subheader(f"シミュレーション結果 ({end_age}歳まで / {num_simulations}回試行)")
+
+            # ★ここに追加：初心者向けガイド（デフォルトで開いておく）
+            with st.expander("🔰 数字の見方ガイド（初めての方はこちら）", expanded=True):
+                st.markdown("""
+                * **生存率**: 資産が底をつかない確率です。**80〜90%以上** あれば安心と言えます。
+                * **単純計算**: リスク（変動）を無視して、計算機通りに増え続けた場合の金額です。
+                * **中央値**: 1万回のうち、ちょうど真ん中の結果です。**一番現実的な未来** の目安です。
+                * **不調時**: 運悪く不景気が続いた場合の結果です。**「最悪でもこれくらい」** という守りの目安です。
+                """)
+
             res_col1, res_col2, res_col3, res_col4 = st.columns(4)
             res_col1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
             res_col2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
             res_col3.metric("中央値", f"{int(median_res[-1]):,}万")
             res_col4.metric("不調時", f"{int(bottom_10_res[-1]):,}万")
 
-            # --- 結果表示2: グラフ ---
+            # --- グラフ ---
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
@@ -300,27 +307,26 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
 
             st.divider()
 
-            # --- 結果表示3: 分布テーブル（10歳刻み） ---
+            # --- 表1: 確率分布 ---
             st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
-            st.caption("シミュレーション結果のバラつき（上位〜下位）を表示します。")
-
+            st.info("💡 **見方**: 「上位10%」はすごく運が良かった場合、「下位10%（91-100%）」は運が悪かった場合の金額です。")
+            
             step_years = 10
             target_ages = list(range(current_age, end_age + 1, step_years))
             if target_ages[-1] != end_age:
                 target_ages.append(end_age)
             
-            # --- 表1: 確率分布（パーセンタイル） ---
             percentile_ranges = [
                 (90, 100, "上位 10%"),
                 (80, 90, "11% - 20%"),
                 (70, 80, "21% - 30%"),
                 (60, 70, "31% - 40%"),
-                (50, 60, "41% - 50%"),
+                (50, 60, "41% - 50% (中央)"), # わかりやすく表記変更
                 (40, 50, "51% - 60%"),
                 (30, 40, "61% - 70%"),
                 (20, 30, "71% - 80%"),
                 (10, 20, "81% - 90%"),
-                (0, 10, "91% - 100%")
+                (0, 10, "91% - 100% (下位)")
             ]
             
             dist_data = {"ランク": [label for _, _, label in percentile_ranges]}
@@ -331,12 +337,10 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 idx = target_age - current_age
                 assets_at_age = np.sort(simulation_results[:, idx])
                 
-                # 分布データの作成
                 dist_col = []
                 for p_start, p_end, _ in percentile_ranges:
                     slice_start = int(num_simulations * (p_start / 100))
                     slice_end = int(num_simulations * (p_end / 100))
-                    
                     subset = assets_at_age[slice_start:slice_end]
                     if len(subset) > 0:
                         avg_val = np.mean(subset)
@@ -346,18 +350,15 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 
                 dist_data[col_name] = dist_col
 
-                # 参考データの作成
                 ref_col = []
                 # 単純計算
                 if idx < len(deterministic_assets):
-                    val_simple = deterministic_assets[idx]
-                    ref_col.append(f"{int(val_simple):,} 万円")
+                    ref_col.append(f"{int(deterministic_assets[idx]):,} 万円")
                 else:
                     ref_col.append("-")
                 # 積立元本
                 if idx < len(principal_assets):
-                    val_principal = principal_assets[idx]
-                    ref_col.append(f"{int(val_principal):,} 万円")
+                    ref_col.append(f"{int(principal_assets[idx]):,} 万円")
                 else:
                     ref_col.append("-")
                 
@@ -366,8 +367,8 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             df_dist = pd.DataFrame(dist_data)
             st.dataframe(df_dist, hide_index=True, use_container_width=True)
 
-            # --- 表2: 参考データ（元本・理論値） ---
-            st.caption("👇 投資効果の比較用（リスクを含まない計算値）")
+            # --- 表2: 参考データ ---
+            st.caption("👇 **比較用データ**: 投資をしなかった場合(積立元本)や、リスク0で計算した場合(単純計算)の数値です。")
             df_ref = pd.DataFrame(ref_data)
             st.dataframe(df_ref, hide_index=True, use_container_width=True)
 
