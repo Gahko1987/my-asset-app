@@ -17,20 +17,15 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     col_b1, col_b2 = st.columns(2)
     
     with col_b1:
-        # 年齢
         current_age = st.number_input("現在の年齢", 0, 100, 39, key="input_current_age")
-        # 資産
         current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 2300)
-        # インフレ率
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
     with col_b2:
-        # 利回り
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 10.0, 5.0, 0.1)
-        # リスク
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 30.0, 15.0, 0.5)
 
-# %を小数に変換
+# 計算用数値
 mean_return = mean_return_pct / 100
 risk_std = risk_std_pct / 100
 inflation_rate = inflation_rate_pct / 100
@@ -39,121 +34,158 @@ real_mean_return = mean_return - inflation_rate
 st.divider()
 
 # ==========================================
-# 入力エリア（表をやめて、分かりやすい入力フォームに変更）
+# データ管理用ロジック（追加・削除機能）
+# ==========================================
+
+# 1. ライフステージの初期データ
+if "phases_list" not in st.session_state:
+    st.session_state.phases_list = [
+        {"end": 42, "amount": 900},
+        {"end": 60, "amount": 400},
+        {"end": 65, "amount": 100},
+        {"end": 95, "amount": -300},
+    ]
+
+# 2. イベントの初期データ
+if "events_list" not in st.session_state:
+    st.session_state.events_list = [
+        {"age": 60, "amount": 2000, "name": "退職金"},
+        {"age": 55, "amount": -300, "name": "車の購入"},
+    ]
+
+# ボタン操作のコールバック関数
+def add_phase():
+    # 最後の期間の終了年齢+5歳をデフォルトにする
+    last_end = st.session_state.phases_list[-1]["end"]
+    st.session_state.phases_list.append({"end": last_end + 5, "amount": 0})
+
+def remove_phase():
+    if len(st.session_state.phases_list) > 1:
+        st.session_state.phases_list.pop()
+
+def add_event():
+    st.session_state.events_list.append({"age": current_age + 1, "amount": -100, "name": "新しいイベント"})
+
+def remove_event(index):
+    st.session_state.events_list.pop(index)
+
+# ==========================================
+# メイン画面入力エリア
 # ==========================================
 col1, col2 = st.columns(2)
 
-# === 左側：ライフステージ入力 ===
+# === 左側：ライフステージ入力（期間追加式） ===
 with col1:
-    st.subheader("1. ライフステージ収支 (年額)")
-    st.info("人生を4つの期間に分けて、貯金額（または生活費）を設定します。")
+    st.subheader("1. ライフステージ収支")
+    st.info("期間を追加・削除して、人生の収支計画を立てましょう。")
 
-    # --- 第1期間 ---
-    st.markdown("##### 🟢 第1期間 (現在 〜 )")
-    c1_1, c1_2 = st.columns([1, 1])
-    with c1_1:
-        phase1_end = st.number_input("何歳まで？ (第1期間)", min_value=current_age, max_value=120, value=42)
-    with c1_2:
-        phase1_save = st.number_input("年間の収支 (万円)", value=900, key="p1_save", help="プラスは貯金、マイナスは取り崩し")
+    # 期間のリストを表示
+    start_age_tracker = current_age
+    
+    for i, phase in enumerate(st.session_state.phases_list):
+        st.markdown(f"**🔹 第{i+1}期間 ({start_age_tracker}歳 〜 )**")
+        
+        c_p1, c_p2 = st.columns([1, 1])
+        with c_p1:
+            # 終了年齢の入力（変更するとsession_stateを直接書き換える）
+            new_end = st.number_input(
+                f"何歳まで？ (第{i+1}期間)",
+                min_value=start_age_tracker, 
+                max_value=150,
+                value=int(phase["end"]),
+                key=f"phase_end_{i}"
+            )
+            st.session_state.phases_list[i]["end"] = new_end
+            
+        with c_p2:
+            # 金額の入力
+            new_amount = st.number_input(
+                f"年間の収支 (万円)",
+                value=int(phase["amount"]),
+                key=f"phase_amount_{i}"
+            )
+            st.session_state.phases_list[i]["amount"] = new_amount
+        
+        # 次の期間の開始年齢を更新
+        start_age_tracker = new_end + 1
+        st.markdown("---")
 
-    # --- 第2期間 ---
-    st.markdown(f"##### 🔵 第2期間 ({phase1_end + 1}歳 〜 )")
-    c2_1, c2_2 = st.columns([1, 1])
-    with c2_1:
-        phase2_end = st.number_input("何歳まで？ (第2期間)", min_value=phase1_end+1, max_value=120, value=60)
-    with c2_2:
-        phase2_save = st.number_input("年間の収支 (万円)", value=400, key="p2_save")
+    # 追加・削除ボタン
+    b_col1, b_col2 = st.columns(2)
+    with b_col1:
+        st.button("➕ 期間を追加", on_click=add_phase, use_container_width=True)
+    with b_col2:
+        st.button("🗑️ 最後の期間を削除", on_click=remove_phase, use_container_width=True)
 
-    # --- 第3期間 ---
-    st.markdown(f"##### 🟡 第3期間 ({phase2_end + 1}歳 〜 )")
-    c3_1, c3_2 = st.columns([1, 1])
-    with c3_1:
-        phase3_end = st.number_input("何歳まで？ (第3期間)", min_value=phase2_end+1, max_value=120, value=65)
-    with c3_2:
-        phase3_save = st.number_input("年間の収支 (万円)", value=100, key="p3_save")
 
-    # --- 第4期間 ---
-    st.markdown(f"##### 🟠 第4期間 ({phase3_end + 1}歳 〜 )")
-    c4_1, c4_2 = st.columns([1, 1])
-    with c4_1:
-        phase4_end = st.number_input("何歳まで？ (第4期間)", min_value=phase3_end+1, max_value=120, value=100)
-    with c4_2:
-        phase4_save = st.number_input("年間の収支 (万円)", value=-300, key="p4_save")
-
-    # データをまとめる
-    phases_list = [
-        {"start": current_age, "end": phase1_end, "amount": phase1_save},
-        {"start": phase1_end + 1, "end": phase2_end, "amount": phase2_save},
-        {"start": phase2_end + 1, "end": phase3_end, "amount": phase3_save},
-        {"start": phase3_end + 1, "end": phase4_end, "amount": phase4_save},
-    ]
-
-# === 右側：イベント入力 ===
+# === 右側：イベント入力（リスト追加式） ===
 with col2:
     st.subheader("2. イベント・一時金")
-    st.caption("退職金や家の購入など、大きな出費や収入を入力")
+    st.caption("イベントを好きなだけ追加できます。")
 
-    # --- イベント1 ---
-    st.markdown("##### イベント 1")
-    e1_1, e1_2, e1_3 = st.columns([1, 1, 1.5])
-    with e1_1:
-        ev1_age = st.number_input("年齢", min_value=0, max_value=120, value=60, key="ev1_age")
-    with e1_2:
-        ev1_amount = st.number_input("金額(万円)", value=2000, key="ev1_amount")
-    with e1_3:
-        ev1_name = st.text_input("内容", value="退職金", key="ev1_name")
+    # 削除ボタンが押されたときにループが狂わないよう、一時リストを作成して表示
+    for i, event in enumerate(st.session_state.events_list):
+        with st.container(border=True):
+            e_col1, e_col2 = st.columns([2, 1])
+            with e_col1:
+                st.markdown(f"**イベント {i+1}**")
+            with e_col2:
+                if st.button("🗑️ 削除", key=f"del_event_{i}"):
+                    remove_event(i)
+                    st.rerun()
+            
+            e_in1, e_in2, e_in3 = st.columns([1, 1, 1.5])
+            with e_in1:
+                new_age = st.number_input("年齢", min_value=0, max_value=150, value=int(event["age"]), key=f"ev_age_{i}")
+                st.session_state.events_list[i]["age"] = new_age
+            with e_in2:
+                new_amt = st.number_input("金額(万円)", value=int(event["amount"]), key=f"ev_amt_{i}")
+                st.session_state.events_list[i]["amount"] = new_amt
+            with e_in3:
+                new_name = st.text_input("内容", value=event["name"], key=f"ev_name_{i}")
+                st.session_state.events_list[i]["name"] = new_name
 
-    # --- イベント2 ---
-    st.markdown("##### イベント 2")
-    e2_1, e2_2, e2_3 = st.columns([1, 1, 1.5])
-    with e2_1:
-        ev2_age = st.number_input("年齢", min_value=0, max_value=120, value=55, key="ev2_age")
-    with e2_2:
-        ev2_amount = st.number_input("金額(万円)", value=-300, key="ev2_amount")
-    with e2_3:
-        ev2_name = st.text_input("内容", value="車の購入", key="ev2_name")
+    st.button("➕ イベントを追加", on_click=add_event, use_container_width=True)
 
-    # --- イベント3 ---
-    st.markdown("##### イベント 3")
-    e3_1, e3_2, e3_3 = st.columns([1, 1, 1.5])
-    with e3_1:
-        ev3_age = st.number_input("年齢", min_value=0, max_value=120, value=0, key="ev3_age")
-    with e3_2:
-        ev3_amount = st.number_input("金額(万円)", value=0, key="ev3_amount")
-    with e3_3:
-        ev3_name = st.text_input("内容", value="", key="ev3_name")
-
-    # イベントデータをまとめる
-    events_list = [
-        {"age": ev1_age, "amount": ev1_amount},
-        {"age": ev2_age, "amount": ev2_amount},
-        {"age": ev3_age, "amount": ev3_amount},
-    ]
 
 # --- シミュレーション実行ボタン ---
 st.divider()
 if st.button("シミュレーションを実行する (10,000回)", type="primary"):
     
     try:
-        # 計算ロジック
-        end_age = phase4_end
+        # 最終的な終了年齢を取得
+        if st.session_state.phases_list:
+            end_age = st.session_state.phases_list[-1]["end"]
+        else:
+            end_age = 100
+            
         years = end_age - current_age
+        # 年数がマイナスや0にならないようガード
+        if years <= 0:
+            st.error("エラー：終了年齢が現在の年齢より未来になるように設定してください。")
+            st.stop()
+            
         num_simulations = 10000 
         
         # 収支マップ作成
         cashflow_map = {}
-        for p in phases_list:
-            start, end, amount = int(p["start"]), int(p["end"]), p["amount"]
-            if start <= end:
-                for age in range(start, end + 1):
-                    cashflow_map[age] = amount
+        # ループ用に開始年齢を再計算
+        temp_start = current_age
+        for p in st.session_state.phases_list:
+            end_val = int(p["end"])
+            amount_val = int(p["amount"])
+            
+            if temp_start <= end_val:
+                for age in range(temp_start, end_val + 1):
+                    cashflow_map[age] = amount_val
+            temp_start = end_val + 1
 
         # イベントマップ作成
         event_map = {}
-        for e in events_list:
-            age, amount = int(e["age"]), int(e["amount"])
-            if amount != 0: # 金額が0のイベントは無視
-                event_map[age] = event_map.get(age, 0) + amount
+        for e in st.session_state.events_list:
+            age = int(e["age"])
+            amount = int(e["amount"])
+            event_map[age] = event_map.get(age, 0) + amount
 
         # --- A. 単純計算 ---
         deterministic_assets = [current_assets]
@@ -214,9 +246,12 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
         age_axis = np.arange(current_age, end_age + 1)
         
         # 老後エリア（マイナス収支の期間）の色付け
-        for p in phases_list:
+        temp_start = current_age
+        for p in st.session_state.phases_list:
+            end_val = int(p["end"])
             if p["amount"] < 0:
-                ax.axvspan(p["start"], p["end"], color='orange', alpha=0.1)
+                ax.axvspan(temp_start, end_val, color='orange', alpha=0.1)
+            temp_start = end_val + 1
 
         ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
         ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
@@ -233,4 +268,4 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
         st.pyplot(fig)
 
     except Exception as e:
-        st.error(f"エラー: {e}")
+        st.error(f"エラーが発生しました: {e}")
