@@ -104,7 +104,7 @@ with col2:
 
 # --- シミュレーション実行ボタン ---
 st.divider()
-if st.button("シミュレーションを実行する", type="primary"):
+if st.button("シミュレーションを実行する (10,000回)", type="primary"):
     
     try:
         # データ整理
@@ -119,7 +119,9 @@ if st.button("シミュレーションを実行する", type="primary"):
                  end_age = int(valid_phases["終了年齢"].max())
 
         years = end_age - current_age
-        num_simulations = 1000
+        
+        # ★ここを変更しました★
+        num_simulations = 10000 
         
         cashflow_map = {}
         for index, row in phases_data.iterrows():
@@ -145,72 +147,4 @@ if st.button("シミュレーションを実行する", type="primary"):
         for year in range(years):
             age = current_age + year
             annual_flow = cashflow_map.get(age, 0)
-            spot_flow = event_map.get(age, 0)
-            
-            prev_asset = deterministic_assets[-1]
-            if prev_asset <= 0:
-                new_value = 0
-            else:
-                total_principal = prev_asset + annual_flow + spot_flow
-                new_value = total_principal * (1 + real_mean_return)
-                if new_value < 0: new_value = 0
-            deterministic_assets.append(new_value)
-
-        # --- B. モンテカルロ ---
-        simulation_results = np.zeros((num_simulations, years + 1))
-        
-        for i in range(num_simulations):
-            assets = [current_assets]
-            for year in range(years):
-                age = current_age + year
-                annual_flow = cashflow_map.get(age, 0)
-                spot_flow = event_map.get(age, 0)
-                market_return = np.random.normal(real_mean_return, risk_std)
-                
-                prev_asset = assets[-1]
-                if prev_asset <= 0:
-                    new_value = 0
-                else:
-                    total_principal = prev_asset + annual_flow + spot_flow
-                    new_value = total_principal * (1 + market_return)
-                    if new_value < 0: new_value = 0
-                assets.append(new_value)
-            simulation_results[i, :] = assets
-
-        # 結果表示
-        median_res = np.percentile(simulation_results, 50, axis=0)
-        top_10_res = np.percentile(simulation_results, 90, axis=0)
-        bottom_10_res = np.percentile(simulation_results, 10, axis=0)
-        ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
-
-        st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
-        res_col1, res_col2, res_col3, res_col4 = st.columns(4)
-        res_col1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
-        res_col2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
-        res_col3.metric("中央値", f"{int(median_res[-1]):,}万")
-        res_col4.metric("不調時", f"{int(bottom_10_res[-1]):,}万")
-
-        fig, ax = plt.subplots(figsize=(10, 6))
-        # ★ここがエラーの原因でした。この行もtryの中に収まるようインデントを調整済みです。
-        age_axis = np.arange(current_age, end_age + 1)
-        
-        for index, row in phases_data.iterrows():
-            if not pd.isna(row["収支(万円)"]) and row["収支(万円)"] < 0:
-                ax.axvspan(row["開始年齢"], row["終了年齢"], color='orange', alpha=0.1)
-
-        ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
-        ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
-        ax.plot(age_axis, top_10_res, color='green', linestyle='--', linewidth=1, label='好調')
-        ax.plot(age_axis, bottom_10_res, color='red', linestyle='--', linewidth=1, label='不調')
-        
-        ax.set_title("資産推移", fontsize=14)
-        ax.set_xlabel("年齢")
-        ax.set_ylabel("資産額 (万円)")
-        ax.legend()
-        ax.grid(True, linestyle='--', alpha=0.7)
-        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
-        
-        st.pyplot(fig)
-
-    except Exception as e:
-        st.error(f"エラー: {e}")
+            spot_flow = event
