@@ -22,10 +22,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
 
     with col_b2:
-        # 利回りスライダー
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
-        
-        # ★ここに追加：利回りの参考データ
         st.caption("""
         **📈 利回りの目安 (長期・円ベース)**
         - 🇯🇵 **TOPIX**: 4% 〜 6%
@@ -34,10 +31,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         - 🏛 **NASDAQ**: 9% 〜 13%
         """)
         
-        # リスクスライダー
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
-        
-        # リスクの参考データ
         st.caption("""
         **📊 リスクの目安 (円ベース)**
         - 🇯🇵 **TOPIX**: 15% 〜 18%
@@ -109,7 +103,7 @@ with col1:
         
         c_p1, c_p2 = st.columns([1, 1])
         with c_p1:
-            # 年齢矛盾のエラー回避ロジック
+            # 年齢矛盾のエラー回避
             min_val = start_age_tracker
             current_end_val = int(phase["end"])
             
@@ -252,12 +246,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 
             progress_bar.progress(1.0)
 
-            # 結果表示
+            # --- 集計 ---
             median_res = np.percentile(simulation_results, 50, axis=0)
             top_10_res = np.percentile(simulation_results, 90, axis=0)
             bottom_10_res = np.percentile(simulation_results, 10, axis=0)
             ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
 
+            # --- 結果表示1: サマリ ---
             st.subheader(f"シミュレーション結果 ({end_age}歳まで / {num_simulations}回試行)")
             res_col1, res_col2, res_col3, res_col4 = st.columns(4)
             res_col1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
@@ -265,10 +260,10 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             res_col3.metric("中央値", f"{int(median_res[-1]):,}万")
             res_col4.metric("不調時", f"{int(bottom_10_res[-1]):,}万")
 
+            # --- 結果表示2: グラフ ---
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
-            # 色付け
             temp_start = current_age
             for p in st.session_state.phases_list:
                 end_val = int(p["end"])
@@ -289,6 +284,75 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             
             st.pyplot(fig)
+
+            # --- 結果表示3: 分布テーブル（★新機能★） ---
+            st.divider()
+            st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
+            st.caption("各年齢ごとの上位〜下位グループの平均資産額を表示します。")
+
+            # 10歳刻みの年齢リストを作成（現在、+10, +20... 終了年齢）
+            step_years = 10
+            target_ages = list(range(current_age, end_age + 1, step_years))
+            # 終了年齢が含まれていなければ追加
+            if target_ages[-1] != end_age:
+                target_ages.append(end_age)
+            # 現在年齢が含まれていれば削除（0年後は現在資産そのままなので省略可だが、入れても良い。今回は入れる）
+            
+            # テーブルの行ラベル（上位10%〜下位10%）
+            percentile_ranges = [
+                (90, 100, "上位 10%"),
+                (80, 90, "11% - 20%"),
+                (70, 80, "21% - 30%"),
+                (60, 70, "31% - 40%"),
+                (50, 60, "41% - 50%"),
+                (40, 50, "51% - 60%"),
+                (30, 40, "61% - 70%"),
+                (20, 30, "71% - 80%"),
+                (10, 20, "81% - 90%"),
+                (0, 10, "91% - 100%")
+            ]
+            
+            # データフレーム作成用の辞書
+            table_data = {"ランク": [label for _, _, label in percentile_ranges]}
+            
+            for target_age in target_ages:
+                # 配列のインデックス
+                idx = target_age - current_age
+                
+                # その年の全シミュレーション結果を取得してソート
+                assets_at_age = np.sort(simulation_results[:, idx])
+                
+                col_values = []
+                for p_start, p_end, _ in percentile_ranges:
+                    # p_start% 〜 p_end% の範囲のデータを抽出
+                    # np.percentileではなく、ソート済み配列のスライスで平均をとる
+                    # インデックス計算
+                    idx_start = int(num_simulations * (p_start / 100))
+                    idx_end = int(num_simulations * (p_end / 100))
+                    
+                    # 境界値の調整（配列外参照防止）
+                    if idx_end == num_simulations: idx_end -= 1
+                    if idx_start == num_simulations: idx_start -= 1
+                    
+                    # 範囲内の平均値を計算
+                    # スライスは [start:end] なので、p_startが0の場合は 0:1000 となる
+                    # numpyの仕様に合わせて調整
+                    slice_start = int(num_simulations * (p_start / 100))
+                    slice_end = int(num_simulations * (p_end / 100))
+                    
+                    subset = assets_at_age[slice_start:slice_end]
+                    if len(subset) > 0:
+                        avg_val = np.mean(subset)
+                    else:
+                        avg_val = 0
+                    
+                    col_values.append(f"{int(avg_val):,} 万円")
+                
+                table_data[f"{target_age}歳"] = col_values
+
+            # データフレーム表示
+            df_table = pd.DataFrame(table_data)
+            st.dataframe(df_table, hide_index=True, use_container_width=True)
 
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
