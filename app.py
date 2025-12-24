@@ -51,9 +51,17 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
 
         st.markdown("---")
         st.markdown("##### 👴 年金設定")
-        pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65, help="この年齢から毎年、年金収入が加算されます")
-        pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240, help="夫婦合計の額を入力。例:月20万なら240万円")
-        st.caption(f"※ 月額換算: 約 {int(pension_annual/12):,} 万円")
+        # ★ここに追加：年金計算をするかどうかのチェックボックス
+        use_pension = st.checkbox("年金を考慮する", value=True)
+        
+        if use_pension:
+            pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65, help="この年齢から毎年、年金収入が加算されます")
+            pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240, help="夫婦合計の額を入力。例:月20万なら240万円")
+            st.caption(f"※ 月額換算: 約 {int(pension_annual/12):,} 万円")
+        else:
+            # 計算に使わない場合のダミー値（計算ロジックで use_pension を見るので影響なし）
+            pension_start_age = 65
+            pension_annual = 0
 
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
@@ -225,11 +233,12 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
-            # 3. 年金の加算
-            for y in range(years + 1):
-                age = current_age + y
-                if age >= pension_start_age:
-                    cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
+            # 3. 年金の加算 (ONの場合のみ)
+            if use_pension:
+                for y in range(years + 1):
+                    age = current_age + y
+                    if age >= pension_start_age:
+                        cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
 
             # 4. イベントマップ作成
             event_map = {}
@@ -281,7 +290,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             progress_bar.progress(1.0)
 
             # --- 結果集計 ---
-            # ★ここで上位20%、下位20%を計算
+            # 上位/下位20%を使用
             median_res = np.percentile(simulation_results, 50, axis=0)
             top_20_res = np.percentile(simulation_results, 80, axis=0)
             bottom_20_res = np.percentile(simulation_results, 20, axis=0)
@@ -293,8 +302,9 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             total_edu = sum(education_cost_map.values())
             if total_edu > 0: st.info(f"🎓 **教育費の合計負担額: 約 {total_edu:,} 万円** が収支から自動で差し引かれています。")
             
-            # 年金アラート
-            st.success(f"👴 **年金収入**: {pension_start_age}歳から毎年 {pension_annual:,} 万円 が収支に自動で加算されています。")
+            # 年金アラート (ONの場合のみ)
+            if use_pension:
+                st.success(f"👴 **年金収入**: {pension_start_age}歳から毎年 {pension_annual:,} 万円 が収支に自動で加算されています。")
 
             with st.expander("🔰 数字の見方ガイド", expanded=True):
                 st.markdown("""
@@ -321,12 +331,14 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # 赤字期間(オレンジ)
             for y in range(years):
                 age = current_age + y
+                # 実際のキャッシュフローを確認
                 flow = cashflow_map.get(age, 0)
                 if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
 
             ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
             ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
-            # ★ここで上位20%、下位20%を表示
+            
+            # 上位/下位20%
             ax.plot(age_axis, top_20_res, color='green', linestyle='--', linewidth=1, label='好調 (上位20%)')
             ax.plot(age_axis, bottom_20_res, color='red', linestyle='--', linewidth=1, label='不調 (下位20%)')
             
