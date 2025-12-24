@@ -56,76 +56,93 @@ with col2:
 # --- シミュレーション実行 ---
 if st.button("シミュレーションを実行する", type="primary"):
     
-    # データの準備
-    life_phases = edited_phases.values.tolist()
-    spot_events = df_events.values.tolist()
-    
-    # 計算ロジック（前回のコードと同じロジック）
-    end_age = int(edited_phases["終了年齢"].max())
-    years = end_age - current_age
-    simulation_results = np.zeros((num_simulations, years + 1))
-    
-    cashflow_map = {}
-    for index, row in edited_phases.iterrows():
-        start, end, amount = int(row["開始年齢"]), int(row["終了年齢"]), row["収支(万円)"]
-        for age in range(start, end + 1):
-            cashflow_map[age] = amount
+    # エラー防止：データが正しく入力されているかチェック
+    try:
+        # 計算ロジック
+        if edited_phases.empty:
+             end_age = 95
+        else:
+             # 空行を除去して最大年齢を取得
+             valid_phases = edited_phases.dropna(subset=["終了年齢"])
+             if valid_phases.empty:
+                 end_age = 95
+             else:
+                 end_age = int(valid_phases["終了年齢"].max())
 
-    event_map = {}
-    for index, row in edited_events.iterrows():
-        age, amount = int(row["年齢"]), row["金額(万円)"]
-        event_map[age] = event_map.get(age, 0) + amount
+        years = end_age - current_age
+        simulation_results = np.zeros((num_simulations, years + 1))
+        
+        cashflow_map = {}
+        for index, row in edited_phases.iterrows():
+            # 空データがあればスキップ
+            if pd.isna(row["開始年齢"]) or pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
+                continue
+            start, end, amount = int(row["開始年齢"]), int(row["終了年齢"]), row["収支(万円)"]
+            for age in range(start, end + 1):
+                cashflow_map[age] = amount
 
-    # モンテカルロ計算
-    for i in range(num_simulations):
-        assets = [current_assets]
-        for year in range(years):
-            age = current_age + year
-            annual_flow = cashflow_map.get(age, 0)
-            spot_flow = event_map.get(age, 0)
-            market_return = np.random.normal(real_mean_return, risk_std)
-            
-            prev_asset = assets[-1]
-            if prev_asset <= 0:
-                new_value = 0
-            else:
-                total_principal = prev_asset + annual_flow + spot_flow
-                new_value = total_principal * (1 + market_return)
-                if new_value < 0: new_value = 0
-            assets.append(new_value)
-        simulation_results[i, :] = assets
+        event_map = {}
+        for index, row in edited_events.iterrows():
+            # 空データがあればスキップ
+            if pd.isna(row["年齢"]) or pd.isna(row["金額(万円)"]):
+                continue
+            age, amount = int(row["年齢"]), row["金額(万円)"]
+            event_map[age] = event_map.get(age, 0) + amount
 
-    # --- 結果表示 ---
-    median_res = np.percentile(simulation_results, 50, axis=0)
-    top_10_res = np.percentile(simulation_results, 90, axis=0)
-    bottom_10_res = np.percentile(simulation_results, 10, axis=0)
-    ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
+        # モンテカルロ計算
+        for i in range(num_simulations):
+            assets = [current_assets]
+            for year in range(years):
+                age = current_age + year
+                annual_flow = cashflow_map.get(age, 0)
+                spot_flow = event_map.get(age, 0)
+                market_return = np.random.normal(real_mean_return, risk_std)
+                
+                prev_asset = assets[-1]
+                if prev_asset <= 0:
+                    new_value = 0
+                else:
+                    total_principal = prev_asset + annual_flow + spot_flow
+                    new_value = total_principal * (1 + market_return)
+                    if new_value < 0: new_value = 0
+                assets.append(new_value)
+            simulation_results[i, :] = assets
 
-    # 結果サマリ
-    st.divider()
-    res_col1, res_col2, res_col3 = st.columns(3)
-    res_col1.metric("95歳時点の生存率", f"{100 - ruin_prob:.1f}%")
-    res_col2.metric("最終資産 (中央値)", f"{int(median_res[-1]):,} 万円")
-    res_col3.metric("最終資産 (不調時)", f"{int(bottom_10_res[-1]):,} 万円")
+        # --- 結果表示 ---
+        median_res = np.percentile(simulation_results, 50, axis=0)
+        top_10_res = np.percentile(simulation_results, 90, axis=0)
+        bottom_10_res = np.percentile(simulation_results, 10, axis=0)
+        ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
 
-    # グラフ描画
-    fig, ax = plt.subplots(figsize=(10, 6))
-    age_axis = np.arange(current_age, end_age + 1)
-    
-    # 老後エリア
-    retirement_start = 66
-    if retirement_start <= end_age:
-        ax.axvspan(retirement_start, end_age, color='orange', alpha=0.1, label='老後期間')
+        # 結果サマリ
+        st.divider()
+        res_col1, res_col2, res_col3 = st.columns(3)
+        res_col1.metric("95歳時点の生存率", f"{100 - ruin_prob:.1f}%")
+        res_col2.metric("最終資産 (中央値)", f"{int(median_res[-1]):,} 万円")
+        res_col3.metric("最終資産 (不調時)", f"{int(bottom_10_res[-1]):,} 万円")
 
-    ax.plot(age_axis, median_res, color='blue', linewidth=3, label='中央値')
-    ax.plot(age_axis, top_10_res, color='green', linestyle='--', label='好調 (上位10%)')
-    ax.plot(age_axis, bottom_10_res, color='red', linestyle='--', label='不調 (下位10%)')
-    
-    ax.set_title(f"資産推移シミュレーション ({num_simulations}回試行)", fontsize=14)
-    ax.set_xlabel("年齢")
-    ax.set_ylabel("資産額 (万円)")
-    ax.legend()
-    ax.grid(True, linestyle='--', alpha=0.7)
-    ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
-    
-    st.pyplot(fig)
+        # グラフ描画
+        fig, ax = plt.subplots(figsize=(10, 6))
+        age_axis = np.arange(current_age, end_age + 1)
+        
+        # 老後エリア
+        retirement_start = 66
+        if retirement_start <= end_age:
+            ax.axvspan(retirement_start, end_age, color='orange', alpha=0.1, label='老後期間')
+
+        ax.plot(age_axis, median_res, color='blue', linewidth=3, label='中央値')
+        ax.plot(age_axis, top_10_res, color='green', linestyle='--', label='好調 (上位10%)')
+        ax.plot(age_axis, bottom_10_res, color='red', linestyle='--', label='不調 (下位10%)')
+        
+        ax.set_title(f"資産推移シミュレーション ({num_simulations}回試行)", fontsize=14)
+        ax.set_xlabel("年齢")
+        ax.set_ylabel("資産額 (万円)")
+        ax.legend()
+        ax.grid(True, linestyle='--', alpha=0.7)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
+        
+        st.pyplot(fig)
+
+    except Exception as e:
+        st.error(f"エラーが発生しました: {e}")
+        st.info("入力欄に空欄がないか確認してください。")
