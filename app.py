@@ -78,7 +78,7 @@ if "phases_list" not in st.session_state:
         {"end": 45, "amount": 100},
         {"end": 60, "amount": 200},
         {"end": 65, "amount": 100},
-        {"end": 100, "amount": -100}, # 年金が入るので赤字額を少し減らして初期設定
+        {"end": 100, "amount": -100}, 
     ]
 if "events_list" not in st.session_state:
     st.session_state.events_list = [
@@ -213,8 +213,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
-            # 3. 年金の加算 (★ここに追加)
-            # 現在から終了までループし、年金受給年齢以上なら加算
+            # 3. 年金の加算
             for y in range(years + 1):
                 age = current_age + y
                 if age >= pension_start_age:
@@ -326,7 +325,11 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
             
-            st.caption("🟦 **水色**: 教育費がかかる期間 / 🟧 **オレンジ**: 年間収支がマイナスの期間")
+            # ★ここに追加した説明
+            st.caption("※ グラフ背景の色について：")
+            st.caption("🟦 **水色**: 教育費がかかる期間")
+            st.caption("🟧 **オレンジ**: 収支が赤字（貯金取崩し）の期間")
+            st.caption("🟩 **緑色**: 上記2つが重なっている期間（教育費負担があり、かつ赤字の期間）")
 
             st.divider()
             
