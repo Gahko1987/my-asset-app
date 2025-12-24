@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import japanize_matplotlib  # ←★この1行が絶対に必要です！
+import japanize_matplotlib
 import matplotlib.ticker as ticker
 
 # ページ設定
@@ -30,23 +30,32 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支 (年額)")
-    st.caption("年齢ごとの積立額（プラス）や取り崩し額（マイナス）を設定")
+    st.info("💡 「何歳まで」「いくら」を入力してください。開始年齢は自動でつながります。")
     
-    # 初期データ
+    # 初期データ（終了年齢と金額だけにする）
     default_phases = [
-        {"開始年齢": 39, "終了年齢": 42, "収支(万円)": 900},
-        {"開始年齢": 43, "終了年齢": 60, "収支(万円)": 400},
-        {"開始年齢": 61, "終了年齢": 65, "収支(万円)": 100},
-        {"開始年齢": 66, "終了年齢": 95, "収支(万円)": -300},
+        {"終了年齢": 42, "収支(万円)": 900}, # 39歳〜42歳
+        {"終了年齢": 60, "収支(万円)": 400}, # 43歳〜60歳
+        {"終了年齢": 65, "収支(万円)": 100}, # 61歳〜65歳
+        {"終了年齢": 95, "収支(万円)": -300},# 66歳〜95歳
     ]
     df_phases = pd.DataFrame(default_phases)
-    edited_phases = st.data_editor(df_phases, num_rows="dynamic")
+    
+    # 編集用テーブル（終了年齢でソートして表示）
+    edited_phases = st.data_editor(
+        df_phases, 
+        num_rows="dynamic",
+        column_config={
+            "終了年齢": st.column_config.NumberColumn(min_value=current_age, max_value=120, format="%d歳"),
+            "収支(万円)": st.column_config.NumberColumn(format="%d万円")
+        },
+        use_container_width=True
+    )
 
 with col2:
     st.subheader("2. イベント・一時金")
     st.caption("退職金(プラス)や大きな買い物(マイナス)")
     
-    # 初期データ
     default_events = [
         {"年齢": 60, "金額(万円)": 2000, "内容": "退職金"},
         {"年齢": 55, "金額(万円)": -300, "内容": "車の購入"},
@@ -56,35 +65,44 @@ with col2:
 
 # --- シミュレーション実行 ---
 if st.button("シミュレーションを実行する", type="primary"):
-    
-    # エラー防止：データが正しく入力されているかチェック
     try:
-        # 計算ロジック
-        if edited_phases.empty:
+        # データ整理：終了年齢が若い順に並べ替え
+        sorted_phases = edited_phases.sort_values("終了年齢")
+        
+        # 最終的な終了年齢（一番下の行の年齢）を取得
+        if sorted_phases.empty:
              end_age = 95
         else:
-             # 空行を除去して最大年齢を取得
-             valid_phases = edited_phases.dropna(subset=["終了年齢"])
-             if valid_phases.empty:
-                 end_age = 95
-             else:
-                 end_age = int(valid_phases["終了年齢"].max())
+             end_age = int(sorted_phases["終了年齢"].max())
 
         years = end_age - current_age
         simulation_results = np.zeros((num_simulations, years + 1))
         
+        # 収支マップの作成（ここが自動計算のキモ！）
         cashflow_map = {}
-        for index, row in edited_phases.iterrows():
-            # 空データがあればスキップ
-            if pd.isna(row["開始年齢"]) or pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
+        temp_current_age = current_age # スタート地点
+        
+        for index, row in sorted_phases.iterrows():
+            if pd.isna(row["終了年齢"]) or pd.isna(row["収支(万円)"]):
                 continue
-            start, end, amount = int(row["開始年齢"]), int(row["終了年齢"]), row["収支(万円)"]
-            for age in range(start, end + 1):
-                cashflow_map[age] = amount
+                
+            phase_end_age = int(row["終了年齢"])
+            amount = row["収支(万円)"]
+            
+            # 設定された終了年齢が、現在の年齢より過去ならスキップ
+            if phase_end_age < temp_current_age:
+                continue
+            
+            # 期間を塗りつぶす（temp_current_age から phase_end_age まで）
+            for a in range(temp_current_age, phase_end_age + 1):
+                cashflow_map[a] = amount
+            
+            # 次の期間のスタート地点を更新
+            temp_current_age = phase_end_age + 1
 
+        # イベントマップの作成
         event_map = {}
         for index, row in edited_events.iterrows():
-            # 空データがあればスキップ
             if pd.isna(row["年齢"]) or pd.isna(row["金額(万円)"]):
                 continue
             age, amount = int(row["年齢"]), row["金額(万円)"]
@@ -95,8 +113,11 @@ if st.button("シミュレーションを実行する", type="primary"):
             assets = [current_assets]
             for year in range(years):
                 age = current_age + year
+                
+                # 自動計算したマップから収支を取得
                 annual_flow = cashflow_map.get(age, 0)
                 spot_flow = event_map.get(age, 0)
+                
                 market_return = np.random.normal(real_mean_return, risk_std)
                 
                 prev_asset = assets[-1]
@@ -115,21 +136,20 @@ if st.button("シミュレーションを実行する", type="primary"):
         bottom_10_res = np.percentile(simulation_results, 10, axis=0)
         ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
 
-        # 結果サマリ
         st.divider()
         res_col1, res_col2, res_col3 = st.columns(3)
         res_col1.metric("95歳時点の生存率", f"{100 - ruin_prob:.1f}%")
         res_col2.metric("最終資産 (中央値)", f"{int(median_res[-1]):,} 万円")
         res_col3.metric("最終資産 (不調時)", f"{int(bottom_10_res[-1]):,} 万円")
 
-        # グラフ描画
         fig, ax = plt.subplots(figsize=(10, 6))
         age_axis = np.arange(current_age, end_age + 1)
         
-        # 老後エリア
+        # 老後エリア（マイナス収支の期間）を色付け
+        # 簡易的に66歳以降を老後とするか、収支がマイナスの期間を探す
         retirement_start = 66
         if retirement_start <= end_age:
-            ax.axvspan(retirement_start, end_age, color='orange', alpha=0.1, label='老後期間')
+            ax.axvspan(retirement_start, end_age, color='orange', alpha=0.1, label='老後期間(66歳~)')
 
         ax.plot(age_axis, median_res, color='blue', linewidth=3, label='中央値')
         ax.plot(age_axis, top_10_res, color='green', linestyle='--', label='好調 (上位10%)')
@@ -146,4 +166,3 @@ if st.button("シミュレーションを実行する", type="primary"):
 
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
-        st.info("入力欄に空欄がないか確認してください。")
