@@ -52,33 +52,78 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         st.markdown("---")
         st.markdown("##### 👴 年金設定")
         use_pension = st.checkbox("年金を考慮する", value=True)
-        
         if use_pension:
-            pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65, help="この年齢から毎年、年金収入が加算されます")
-            pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240, help="夫婦合計の額を入力。例:月20万なら240万円")
-            st.caption(f"※ 月額換算: 約 {int(pension_annual/12):,} 万円")
+            pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65)
+            pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240)
         else:
-            pension_start_age = 65
-            pension_annual = 0
+            pension_start_age = 65; pension_annual = 0
 
     with col_b2:
         mean_return_pct = st.slider("想定利回り (年率%)", 0.0, 20.0, 5.0, 0.1)
-        st.caption("""
-        **📈 利回りの目安 (長期・円ベース)**
-        - 🇯🇵 **TOPIX**: 4% 〜 6%
-        - 🌏 **オルカン**: 5% 〜 8%
-        - 🇺🇸 **S&P500**: 7% 〜 10%
-        - 🏛 **NASDAQ**: 9% 〜 13%
-        """)
-        
+        st.caption("📈 目安: オルカン 5-8%, S&P500 7-10%")
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
-        st.caption("""
-        **📊 リスクの目安 (円ベース)**
-        - 🇯🇵 **TOPIX**: 15% 〜 18%
-        - 🌏 **オルカン**: 17% 〜 20%
-        - 🇺🇸 **S&P500**: 19% 〜 23%
-        - 🏛 **NASDAQ**: 23% 〜 28%
-        """)
+        st.caption("📊 目安: オルカン 17-20%, S&P500 19-23%")
+
+    # ★住宅ローン設定 (修正版: 3択ラジオボタン)
+    st.markdown("---")
+    st.markdown("##### 🏠 住宅・ローン設定")
+    
+    housing_option = st.radio(
+        "住居・ローンの状況", 
+        ["考慮しない (賃貸・ローンなし)", "これから購入予定", "すでに購入済み (ローン返済中)"],
+        horizontal=True
+    )
+    
+    housing_info = {"active": False, "annual_pmt": 0, "start_age": 0, "end_age": 0}
+
+    if housing_option == "これから購入予定":
+        h_col1, h_col2, h_col3 = st.columns(3)
+        with h_col1:
+            h_age = st.number_input("購入年齢", current_age, 100, current_age + 5)
+            h_price = st.number_input("物件価格 (万円)", 0, 50000, 4000)
+        with h_col2:
+            h_down = st.number_input("頭金 (万円)", 0, h_price, 500)
+            h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
+        with h_col3:
+            h_years = st.number_input("返済期間 (年)", 1, 50, 35)
+        
+        loan_principal = h_price - h_down
+        start_pay_age = h_age
+        end_pay_age = h_age + h_years - 1
+        
+        # 共通計算へ
+        if loan_principal > 0:
+            r = h_rate / 100 / 12
+            n = h_years * 12
+            monthly_pmt = loan_principal * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else loan_principal / n
+            annual_pmt = monthly_pmt * 12
+            housing_info = {"active": True, "annual_pmt": annual_pmt, "start_age": start_pay_age, "end_age": end_pay_age}
+            st.info(f"📅 **ローン返済**: {start_pay_age}歳〜{end_pay_age}歳まで、年額 約{int(annual_pmt):,}万円")
+
+    elif housing_option == "すでに購入済み (ローン返済中)":
+        h_col1, h_col2 = st.columns(2)
+        with h_col1:
+            loan_principal = st.number_input("現在のローン残高 (万円)", 0, 50000, 3000)
+            h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
+        with h_col2:
+            h_years_remain = st.number_input("残り返済期間 (年)", 1, 50, 25)
+        
+        start_pay_age = current_age
+        end_pay_age = current_age + h_years_remain - 1
+        
+        # 共通計算へ
+        if loan_principal > 0:
+            r = h_rate / 100 / 12
+            n = h_years_remain * 12
+            monthly_pmt = loan_principal * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else loan_principal / n
+            annual_pmt = monthly_pmt * 12
+            housing_info = {"active": True, "annual_pmt": annual_pmt, "start_age": start_pay_age, "end_age": end_pay_age}
+            st.info(f"📅 **ローン返済**: {start_pay_age}歳〜{end_pay_age}歳まで、年額 約{int(annual_pmt):,}万円")
+
+    else:
+        # "考慮しない" が選ばれた場合
+        st.caption("※ 住宅ローン計算は行いません（家賃などは「ライフステージ収支」に入力してください）。")
+
 
 # 計算用数値
 mean_return = mean_return_pct / 100
@@ -131,7 +176,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支")
-    st.info("年金や教育費を含まない、ベースの生活収支を入力してください。")
+    st.info("住居費を除いた、ベースの生活収支を入力してください。")
     start_age_tracker = current_age
     for i, phase in enumerate(st.session_state.phases_list):
         st.markdown(f"**🔹 第{i+1}期間 ({start_age_tracker}歳 〜 )**")
@@ -205,7 +250,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
         else:
             num_simulations = 10000 
             
-            # 1. 基本収支マップ作成
+            # 1. 基本収支マップ
             cashflow_map = {}
             temp_start = current_age
             for p in st.session_state.phases_list:
@@ -231,24 +276,27 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
-            # 3. 年金の加算
-            if use_pension:
-                for y in range(years + 1):
-                    age = current_age + y
-                    if age >= pension_start_age:
-                        cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
+            # 3. 年金 & 住宅ローン
+            for y in range(years + 1):
+                age = current_age + y
+                # 年金
+                if use_pension and age >= pension_start_age:
+                    cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
+                # 住宅ローン
+                if housing_info["active"]:
+                    if housing_info["start_age"] <= age <= housing_info["end_age"]:
+                        cashflow_map[age] = cashflow_map.get(age, 0) - housing_info["annual_pmt"]
 
-            # 4. イベントマップ作成
+            # 4. イベントマップ
             event_map = {}
             for e in st.session_state.events_list:
                 event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
-
-            # --- シミュレーション計算 (A:単純, B:元本, C:モンテカルロ) ---
+            
+            # --- シミュレーション計算 ---
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
             simulation_results = np.zeros((num_simulations, years + 1))
             
-            # A & B
             for year in range(years):
                 age = current_age + year
                 flow = cashflow_map.get(age, 0)
@@ -295,20 +343,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
 
             st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
             
-            # 教育費アラート
             total_edu = sum(education_cost_map.values())
-            if total_edu > 0: st.info(f"🎓 **教育費の合計負担額: 約 {total_edu:,} 万円** が収支から自動で差し引かれています。")
-            
-            # 年金アラート
-            if use_pension:
-                st.success(f"👴 **年金収入**: {pension_start_age}歳から毎年 {pension_annual:,} 万円 が収支に自動で加算されています。")
+            if total_edu > 0: st.info(f"🎓 **教育費**: 総額 約 {total_edu:,} 万円 を考慮済")
+            if use_pension: st.success(f"👴 **年金**: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
+            if housing_info["active"]:
+                total_loan = housing_info["annual_pmt"] * (housing_info["end_age"] - housing_info["start_age"] + 1)
+                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで、総額 約{int(total_loan):,}万円 を返済")
 
             with st.expander("🔰 数字の見方ガイド", expanded=True):
                 st.markdown("""
                 * **生存率**: 資産が底をつかない確率。80%以上が目安。
-                * **単純計算**: 決まった利回りで増え続けた場合の金額。
-                * **中央値**: 最も現実的なシミュレーション結果。
-                * **好調/不調**: **上位20%** と **下位20%** のラインを表示しています。
+                * **好調/不調**: **上位20%** と **下位20%** のラインを表示。
+                * **積立元本(グレー)**: 投資をせず、貯金だけで推移した場合の金額。
                 """)
 
             c1, c2, c3, c4 = st.columns(4)
@@ -321,18 +367,21 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
-            # 教育費期間(水色)
+            # 色分け
             for age, cost in education_cost_map.items():
                 if cost > 0: ax.axvspan(age, age+1, color='cyan', alpha=0.1)
             
-            # 赤字期間(オレンジ)
             for y in range(years):
                 age = current_age + y
                 flow = cashflow_map.get(age, 0)
                 if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
+                
+                # 住宅ローン期間 (紫)
+                if housing_info["active"]:
+                    if housing_info["start_age"] <= age <= housing_info["end_age"]:
+                         ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
 
-            # ★グラフ描画部分 (元本ラインを追加)
-            ax.plot(age_axis, principal_assets, color='gray', linewidth=2, linestyle='-', label='積立元本') # 元本ライン
+            ax.plot(age_axis, principal_assets, color='gray', linewidth=2, linestyle='-', label='積立元本')
             ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
             ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
             ax.plot(age_axis, top_20_res, color='green', linestyle='--', linewidth=1, label='好調 (上位20%)')
@@ -346,17 +395,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
             
-            st.caption("※ グラフ背景の色について：")
-            st.caption("🟦 **水色**: 教育費がかかる期間")
-            st.caption("🟧 **オレンジ**: 収支が赤字（貯金取崩し）の期間")
-            st.caption("🟩 **緑色**: 上記2つが重なっている期間（教育費負担があり、かつ赤字の期間）")
+            st.caption("🟦 **水色背景**: 教育費負担期間 / 🟧 **オレンジ背景**: 赤字期間")
+            st.caption("🟪 **紫の帯(下部)**: 住宅ローン返済期間")
 
             st.divider()
             
             # --- 表1: 資産額分布 (10歳刻み) ---
             st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
-            st.caption("各年齢ごとの上位〜下位グループの平均資産額を表示します。")
-            
             step = 10
             t_ages = list(range(current_age, end_age + 1, step))
             if t_ages[-1] != end_age: t_ages.append(end_age)
@@ -374,8 +419,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 col = f"{ta}歳"
                 idx = ta - current_age
                 vals = np.sort(simulation_results[:, idx])
-                
-                # 分布
                 col_vals = []
                 for s, e, _ in ranges:
                     idx_s, idx_e = int(num_simulations * s / 100), int(num_simulations * e / 100)
@@ -384,7 +427,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     col_vals.append(f"{int(avg):,} 万円")
                 d_data[col] = col_vals
                 
-                # 比較
                 c_vals = []
                 c_vals.append(f"{int(deterministic_assets[idx]):,} 万円" if idx < len(deterministic_assets) else "-")
                 c_vals.append(f"{int(principal_assets[idx]):,} 万円" if idx < len(principal_assets) else "-")
@@ -397,8 +439,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # --- 表2: 教育費内訳 ---
             st.divider()
             st.subheader("🎓 教育費の内訳詳細")
-            st.caption("自動で差し引かれた教育費の内訳です。")
-            
             edu_rows = []
             grand_total = 0
             c_totals = [0]*len(st.session_state.children_list)
