@@ -1,4 +1,3 @@
-
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -48,6 +47,15 @@ def get_school_stage(age):
     if 18 <= age <= 21: return "university"
     return None
 
+# 表表示用の略称
+STAGE_NAMES = {
+    "kindergarten": "幼",
+    "elementary": "小",
+    "junior_high": "中",
+    "high_school": "高",
+    "university": "大"
+}
+
 # ==========================================
 # ▼ 基本設定パネル ▼
 # ==========================================
@@ -55,7 +63,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     col_b1, col_b2 = st.columns(2)
     
     with col_b1:
-        # お子様がいる設定なので、初期値を35歳にしています
         current_age = st.number_input("現在の年齢", 0, 100, 35, key="input_current_age")
         current_assets = st.number_input("現在の資産 (万円)", 0, 500000, 500)
         inflation_rate_pct = st.slider("インフレ率 (%)", 0.0, 5.0, 2.0, 0.1)
@@ -110,8 +117,8 @@ if "events_list" not in st.session_state:
 # 3. 子供情報の初期データ
 if "children_list" not in st.session_state:
     st.session_state.children_list = [
-        {"age": 5, "course": "private_uni"}, # 1人目 (5歳)
-        {"age": 2, "course": "private_uni"}  # 2人目 (2歳)
+        {"age": 5, "course": "private_uni"}, 
+        {"age": 2, "course": "private_uni"}
     ]
 
 # コールバック関数
@@ -214,10 +221,8 @@ with col2:
                     "private_uni": "大学だけ私立 (平均)",
                     "all_private": "すべて私立 (手厚い)"
                 }
-                # コースが存在しない場合の安全策
                 current_c = child["course"]
-                if current_c not in course_opts:
-                    current_c = "private_uni"
+                if current_c not in course_opts: current_c = "private_uni"
 
                 current_idx = list(course_opts.keys()).index(current_c)
                 new_course = st.selectbox(
@@ -280,7 +285,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
         else:
             num_simulations = 10000 
             
-            # --- 収支マップ作成（基本収支） ---
+            # --- 収支マップ作成 ---
             cashflow_map = {}
             temp_start = current_age
             for p in st.session_state.phases_list:
@@ -291,14 +296,12 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[age] = amount_val
                 temp_start = end_val + 1
 
-            # --- 教育費マップ作成 ---
+            # --- 教育費計算 ---
             education_cost_map = {}
-            
             for child in st.session_state.children_list:
                 c_age = child["age"]
                 c_course = child["course"]
-                # 今後25年分くらい計算
-                for y in range(30): 
+                for y in range(40): # 十分な期間
                     current_c_age = c_age + y
                     parent_age = current_age + y
                     
@@ -307,9 +310,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     stage = get_school_stage(current_c_age)
                     if stage:
                         cost = EDU_COSTS[c_course][stage]
-                        # 基本収支から引く
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
-                        # 内訳記録
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
             # --- イベントマップ作成 ---
@@ -349,7 +350,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # --- C. モンテカルロ ---
             simulation_results = np.zeros((num_simulations, years + 1))
             progress_bar = st.progress(0)
-            
             for i in range(num_simulations):
                 assets = [current_assets]
                 if i % 100 == 0: progress_bar.progress(i / num_simulations)
@@ -398,12 +398,10 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
-            # 教育費の色分け (薄い青)
             for age, cost in education_cost_map.items():
                 if cost > 0:
                      ax.axvspan(age, age+1, color='cyan', alpha=0.1)
             
-            # 赤字期間 (薄いオレンジ)
             temp_start = current_age
             for p in st.session_state.phases_list:
                 end_val = int(p["end"])
@@ -423,6 +421,44 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
+
+            # --- 追加: 教育費詳細テーブル ---
+            st.divider()
+            st.subheader("🎓 教育費の内訳詳細")
+            st.caption("自動で差し引かれた教育費の内訳です。（幼:幼稚園, 小:小学校, 中:中学校, 高:高校, 大:大学）")
+            
+            edu_table_data = []
+            # 現在から終了までループ
+            for y in range(years + 1):
+                p_age = current_age + y
+                
+                # その年の教育費合計があるかチェック
+                yearly_total = 0
+                row = {"親の年齢": f"{p_age}歳"}
+                has_student = False
+
+                for i, child in enumerate(st.session_state.children_list):
+                    c_age = child["age"] + y
+                    stage = get_school_stage(c_age)
+                    
+                    if stage:
+                        cost = EDU_COSTS[child["course"]][stage]
+                        yearly_total += cost
+                        s_name = STAGE_NAMES.get(stage, stage)
+                        row[f"子供{i+1}"] = f"{c_age}歳({s_name}): {cost}万"
+                        has_student = True
+                    else:
+                        row[f"子供{i+1}"] = "-"
+                
+                if has_student:
+                    row["教育費合計"] = f"▲{yearly_total}万円"
+                    edu_table_data.append(row)
+            
+            if edu_table_data:
+                st.dataframe(pd.DataFrame(edu_table_data), hide_index=True, use_container_width=True)
+            else:
+                st.info("教育費がかかる期間はありません。")
+
 
             st.divider()
             st.subheader("📋 詳細データ: 資産額の分布")
