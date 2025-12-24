@@ -336,10 +336,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     current_c_age = c_age + y
                     parent_age = current_age + y
                     if parent_age > end_age: break
-                    
-                    # コースを引数に渡す
                     stage = get_school_stage(current_c_age, c_course)
-                    
                     if stage:
                         cost = EDU_COSTS[c_course][stage]
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
@@ -454,14 +451,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
             
-            # 説明書き
             st.caption("※ グラフ背景の色について：")
             st.caption("🟦 **水色の期間**: お子様の教育費がかかっている期間")
             st.caption("🟧 **オレンジの期間**: 年間の収支がマイナス（貯金を取り崩している）期間")
 
             st.divider()
             
-            # --- 表1: 分布詳細 (10%刻み) ---
+            # --- 表1: 分布詳細 ---
             st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
             st.caption("各年齢ごとの上位〜下位グループの平均資産額を表示します。")
             
@@ -511,16 +507,20 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 ref_data[col_name] = ref_col
 
             st.dataframe(pd.DataFrame(dist_data), hide_index=True, use_container_width=True)
-            
             st.caption("👇 比較用データ")
             st.dataframe(pd.DataFrame(ref_data), hide_index=True, use_container_width=True)
 
-            # --- 追加: 教育費詳細テーブル（一番下へ） ---
+            # --- 追加: 教育費詳細テーブル ---
             st.divider()
             st.subheader("🎓 教育費の内訳詳細")
             st.caption("自動で差し引かれた教育費の内訳です。（幼:幼稚園, 小:小学校, 中:中学校, 高:高校, 大:大学, 専:専門学校, 短:短大）")
             
             edu_table_data = []
+            
+            # 合計計算用の変数
+            grand_total_education = 0
+            child_totals = [0] * len(st.session_state.children_list)
+
             for y in range(years + 1):
                 p_age = current_age + y
                 yearly_total = 0
@@ -529,12 +529,16 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
 
                 for i, child in enumerate(st.session_state.children_list):
                     c_age = child["age"] + y
-                    # コースを渡す
                     stage = get_school_stage(c_age, child["course"])
                     
                     if stage:
                         cost = EDU_COSTS[child["course"]][stage]
                         yearly_total += cost
+                        
+                        # 合計に加算
+                        child_totals[i] += cost
+                        grand_total_education += cost
+                        
                         s_name = STAGE_NAMES.get(stage, stage)
                         row[f"子供{i+1}"] = f"{c_age}歳({s_name}): {cost}万"
                         has_student = True
@@ -545,7 +549,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     row["教育費合計"] = f"▲{yearly_total}万円"
                     edu_table_data.append(row)
             
+            # --- 合計行の追加 ---
             if edu_table_data:
+                # 合計行のデータ作成
+                total_row = {"親の年齢": "合計"}
+                for i, total in enumerate(child_totals):
+                    total_row[f"子供{i+1}"] = f"{total:,}万円"
+                total_row["教育費合計"] = f"{grand_total_education:,}万円"
+                
+                # リストの末尾に追加
+                edu_table_data.append(total_row)
+
+                # データフレーム表示
                 st.dataframe(pd.DataFrame(edu_table_data), hide_index=True, use_container_width=True)
             else:
                 st.info("教育費がかかる期間はありません。")
