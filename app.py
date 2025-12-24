@@ -77,7 +77,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         - 🏛 **NASDAQ**: 23% 〜 28%
         """)
 
-    # ★住宅ローン設定
+    # ★住宅ローン設定 (修正版: 完済後改善ロジック用)
     st.markdown("---")
     st.markdown("##### 🏠 住宅・ローン設定")
     
@@ -87,13 +87,16 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         horizontal=True
     )
     
-    housing_info = {"active": False, "annual_pmt": 0, "start_age": 0, "end_age": 0}
+    housing_info = {"type": "none", "annual_pmt": 0, "start_age": 0, "end_age": 0, "current_rent_saved": 0}
 
     if housing_option == "これから購入予定":
+        st.caption("※ 購入後は「現在の住居費」がかからなくなり、代わりに「ローン返済」が始まるとみなして計算します。")
         h_col1, h_col2, h_col3 = st.columns(3)
         with h_col1:
             h_age = st.number_input("購入年齢", current_age, 100, current_age + 5)
             h_price = st.number_input("物件価格 (万円)", 0, 50000, 4000)
+            # ★追加: 現在の家賃（これが浮く計算にするため）
+            current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120, help="この金額が、購入後に収支からプラス（節約）されます")
         with h_col2:
             h_down = st.number_input("頭金 (万円)", 0, h_price, 500)
             h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
@@ -109,10 +112,18 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             n = h_years * 12
             monthly_pmt = loan_principal * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else loan_principal / n
             annual_pmt = monthly_pmt * 12
-            housing_info = {"active": True, "annual_pmt": annual_pmt, "start_age": start_pay_age, "end_age": end_pay_age}
-            st.info(f"📅 **ローン返済**: {start_pay_age}歳〜{end_pay_age}歳まで、年額 約{int(annual_pmt):,}万円")
+            
+            housing_info = {
+                "type": "future",
+                "annual_pmt": annual_pmt,
+                "start_age": start_pay_age,
+                "end_age": end_pay_age,
+                "current_rent_saved": current_rent_val
+            }
+            st.info(f"📅 **計画**: {start_pay_age}歳で購入。以降、家賃{current_rent_val}万が浮き、ローン{int(annual_pmt)}万を支払います。完済({end_pay_age}歳)後は住居費負担がなくなります。")
 
     elif housing_option == "すでに購入済み (ローン返済中)":
+        st.caption("※ 完済後は、現在の収支に含まれている返済額分だけ収支が改善します。")
         h_col1, h_col2 = st.columns(2)
         with h_col1:
             loan_principal = st.number_input("現在のローン残高 (万円)", 0, 50000, 3000)
@@ -128,11 +139,18 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             n = h_years_remain * 12
             monthly_pmt = loan_principal * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else loan_principal / n
             annual_pmt = monthly_pmt * 12
-            housing_info = {"active": True, "annual_pmt": annual_pmt, "start_age": start_pay_age, "end_age": end_pay_age}
-            st.info(f"📅 **ローン返済**: {start_pay_age}歳〜{end_pay_age}歳まで、年額 約{int(annual_pmt):,}万円")
+            
+            housing_info = {
+                "type": "already",
+                "annual_pmt": annual_pmt,
+                "start_age": start_pay_age,
+                "end_age": end_pay_age,
+                "current_rent_saved": 0
+            }
+            st.info(f"📅 **計画**: {end_pay_age}歳で完済予定。以降、年間 約{int(annual_pmt):,}万円 の収支が改善します。")
 
     else:
-        st.caption("※ 住宅ローン計算は行いません（家賃などは「ライフステージ収支」に入力してください）。")
+        st.caption("※ 住宅ローン計算は行いません。")
 
 
 # 計算用数値
@@ -186,7 +204,8 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支")
-    st.info("住居費を除いた、ベースの生活収支を入力してください。")
+    # ★案内文を変更
+    st.info("💡 **現在の住居費（家賃やローン返済額）を含んだ**、年間の収支を入力してください。")
     start_age_tracker = current_age
     for i, phase in enumerate(st.session_state.phases_list):
         st.markdown(f"**🔹 第{i+1}期間 ({start_age_tracker}歳 〜 )**")
@@ -286,16 +305,32 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
-            # 3. 年金 & 住宅ローン
+            # 3. 年金 & 住宅ローン (★ロジック変更)
             for y in range(years + 1):
                 age = current_age + y
+                
                 # 年金
                 if use_pension and age >= pension_start_age:
                     cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
-                # 住宅ローン
-                if housing_info["active"]:
-                    if housing_info["start_age"] <= age <= housing_info["end_age"]:
-                        cashflow_map[age] = cashflow_map.get(age, 0) - housing_info["annual_pmt"]
+                
+                # 住宅ローン調整
+                if housing_info["type"] == "already":
+                    # 「すでに購入」の場合: 
+                    # 完済までは入力通り。完済後(age > end_age)は、ローン返済額分が浮くのでプラス。
+                    if age > housing_info["end_age"]:
+                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["annual_pmt"]
+                
+                elif housing_info["type"] == "future":
+                    # 「これから購入」の場合:
+                    # 購入前(age < start): 入力通り(家賃)。
+                    # 返済中(start <= age <= end): 家賃が浮く(+rent) が、ローンを払う(-loan)。
+                    # 完済後(age > end): 家賃が浮く(+rent) が、ローンはない(0)。つまり大幅改善。
+                    if age >= housing_info["start_age"]:
+                        # まず家賃負担がなくなる分をプラス
+                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"]
+                        # ローン返済期間ならマイナス
+                        if age <= housing_info["end_age"]:
+                            cashflow_map[age] = cashflow_map.get(age, 0) - housing_info["annual_pmt"]
 
             # 4. イベントマップ
             event_map = {}
@@ -356,9 +391,9 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             total_edu = sum(education_cost_map.values())
             if total_edu > 0: st.info(f"🎓 **教育費**: 総額 約 {total_edu:,} 万円 を考慮済")
             if use_pension: st.success(f"👴 **年金**: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
-            if housing_info["active"]:
+            if housing_info["type"] != "none":
                 total_loan = housing_info["annual_pmt"] * (housing_info["end_age"] - housing_info["start_age"] + 1)
-                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで、総額 約{int(total_loan):,}万円 を返済")
+                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。完済後は収支が改善します。")
 
             with st.expander("🔰 数字の見方ガイド", expanded=True):
                 st.markdown("""
@@ -387,7 +422,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
                 
                 # 住宅ローン期間 (紫)
-                if housing_info["active"]:
+                if housing_info["type"] != "none":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                          ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
 
@@ -405,7 +440,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
             
-            # ★復活させた緑色の説明
             st.caption("※ グラフ背景の色について：")
             st.caption("🟦 **水色**: 教育費がかかる期間")
             st.caption("🟧 **オレンジ**: 収支が赤字（貯金取崩し）の期間")
