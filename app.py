@@ -220,15 +220,21 @@ if st.session_state.get("sim_executed", False):
         
         if years > 0:
             num_simulations = 10000 
-            cashflow_map = {}
             
-            # 1. ライフステージ収支
+            # 【明細用】カテゴリごとのフローを記録する辞書
+            base_flow_map = {}
+            edu_flow_map = {}
+            pension_map = {}
+            housing_map = {}
+            
+            # 1. ライフステージ収支 (明細用)
             t_start = current_age
             for p in st.session_state.phases_list:
-                for age in range(t_start, int(p["end"]) + 1): cashflow_map[age] = int(p["amount"])
+                for age in range(t_start, int(p["end"]) + 1): 
+                    base_flow_map[age] = int(p["amount"])
                 t_start = int(p["end"]) + 1
 
-            # 2. 教育費の控除
+            # 2. 教育費の控除 (明細用はマイナス値、表示用はプラス値)
             education_cost_map = {}
             for child in st.session_state.children_list:
                 for y in range(40): 
@@ -237,35 +243,37 @@ if st.session_state.get("sim_executed", False):
                     stage = get_school_stage(child["age"] + y, child["course"])
                     if stage:
                         cost = EDU_COSTS[child["course"]][stage]
-                        cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
+                        edu_flow_map[parent_age] = edu_flow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
-            # 3. 年金 & 住宅ローン
+            # 3. 年金 & 住宅ローン (明細用)
             for y in range(years + 1):
                 age = current_age + y
                 if use_pension and age >= pension_start_age:
-                    cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
+                    pension_map[age] = pension_annual
                 
-                # ★修正箇所: 完済後の保守的設定（プラス加味を行わない）
                 if housing_info["type"] == "already":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
-                        # ベース(今の返済額)と実際の返済額の差額だけマイナスする
-                        cashflow_map[age] = cashflow_map.get(age, 0) + (housing_info["base_pmt"] - actual_pmt)
-                    # 完済後（age > housing_info["end_age"]）は何もしない（保守的）
-
+                        # 現在の返済額からの差額(金利上昇によるマイナス)を記録
+                        housing_map[age] = housing_info["base_pmt"] - actual_pmt
                 elif housing_info["type"] == "future":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
-                        # 家賃が浮く分プラスし、実際の返済額を全額マイナスする
-                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"] - actual_pmt
-                    # 完済後（age > housing_info["end_age"]）は何もしない（保守的）
+                        # 家賃浮き分(プラス)とローン返済分(マイナス)の合算を記録
+                        housing_map[age] = housing_info["current_rent_saved"] - actual_pmt
 
-            # 4. イベント
+            # 4. イベント (明細用)
             event_map = {}
             for e in st.session_state.events_list:
                 event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
-            
+
+            # キャッシュフローの合算
+            cashflow_map = {}
+            for y in range(years + 1):
+                age = current_age + y
+                cashflow_map[age] = base_flow_map.get(age, 0) + pension_map.get(age, 0) + housing_map.get(age, 0) + edu_flow_map.get(age, 0)
+
             # 計算準備
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
@@ -280,6 +288,8 @@ if st.session_state.get("sim_executed", False):
             for year in range(years):
                 prev_d = deterministic_assets[-1]
                 deterministic_assets.append(max(0, (prev_d + total_flows[year]) * (1 + real_mean_return)) if prev_d > 0 else 0)
+                
+                # 積立元本の計算（0未満にならないように制御）
                 principal_assets.append(max(0, principal_assets[-1] + total_flows[year]))
 
                 prev_assets = simulation_results[:, year]
@@ -435,6 +445,40 @@ if st.session_state.get("sim_executed", False):
             
             st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
             st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
+
+            # ==========================================
+            # ★ 追加: CF明細と積立元本推移のテーブル
+            # ==========================================
+            st.divider()
+            st.subheader("🧾 キャッシュフロー明細と積立元本の推移 (1歳ごと)")
+            cf_rows = []
+            for y in range(years):
+                age = current_age + y
+                b = base_flow_map.get(age, 0)
+                p = pension_map.get(age, 0)
+                h = housing_map.get(age, 0)
+                e = edu_flow_map.get(age, 0)
+                ev = event_map.get(age, 0)
+                
+                net = b + p + h + e + ev
+                start_bal = principal_assets[y]
+                end_bal = principal_assets[y+1]
+                
+                cf_rows.append({
+                    "年齢": f"{age}歳",
+                    "年初積立元本": f"{int(start_bal):,} 万円",
+                    "基本収支": f"{int(b):,} 万円",
+                    "年金": f"{int(p):,} 万円",
+                    "住宅・家賃相殺(現在比)": f"{int(h):,} 万円",
+                    "教育費": f"{int(e):,} 万円",
+                    "イベント等": f"{int(ev):,} 万円",
+                    "年間純収支": f"{int(net):,} 万円",
+                    "年末積立元本": f"{int(end_bal):,} 万円"
+                })
+            
+            df_cf = pd.DataFrame(cf_rows).set_index("年齢")
+            st.dataframe(df_cf, use_container_width=True)
+            st.caption("※ 各項目の合計が「年間純収支」となり、年初の元本に足されて「年末積立元本」になります。（ただし、元本は0未満にならないよう計算されます）")
 
             # --- 詳細データ表 ---
             st.divider()
