@@ -49,9 +49,9 @@ STAGE_NAMES = {
 }
 
 # ==========================================
-# ローン計算ロジック (変動金利対応)
+# ローン計算ロジック (変動金利・上限ストッパー対応)
 # ==========================================
-def calculate_loan_schedule(principal, years, initial_rate, annual_increase):
+def calculate_loan_schedule(principal, years, initial_rate, annual_increase, max_rate):
     schedule = []
     current_principal = principal
     base_pmt = 0
@@ -60,7 +60,8 @@ def calculate_loan_schedule(principal, years, initial_rate, annual_increase):
         if current_principal <= 0:
             break
         
-        rate = initial_rate + annual_increase * y
+        # 金利が上限(max_rate)を超えないように制御
+        rate = min(initial_rate + annual_increase * y, max_rate)
         r = rate / 100 / 12
         n = (years - y) * 12
         
@@ -108,17 +109,10 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
         """)
         
         risk_std_pct = st.slider("リスク (標準偏差%)", 0.0, 40.0, 15.0, 0.5)
-        st.caption("""
-        **📊 リスクの目安 (円ベース)**
-        - 🇯🇵 **TOPIX**: 15% 〜 18%
-        - 🌏 **オルカン**: 17% 〜 20%
-        - 🇺🇸 **S&P500**: 19% 〜 23%
-        - 🏛 **NASDAQ**: 23% 〜 28%
-        """)
 
     # --- 住宅ローン設定 ---
     st.markdown("---")
-    st.markdown("##### 🏠 住宅・ローン設定 (変動金利対応)")
+    st.markdown("##### 🏠 住宅・ローン設定 (変動金利・上限対応)")
     
     housing_option = st.radio(
         "住居・ローンの状況", 
@@ -140,11 +134,12 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             h_years = st.number_input("返済期間 (年)", 1, 50, 35)
         with h_col3:
             h_rate = st.number_input("初期金利 (%)", 0.0, 10.0, 1.5, 0.1)
-            h_rate_inc = st.number_input("毎年の金利上昇幅 (%)", 0.0, 2.0, 0.0, 0.05, help="0.0なら固定金利。0.1なら毎年0.1%ずつ上昇。")
+            h_rate_inc = st.number_input("毎年の金利上昇幅 (%)", 0.0, 2.0, 0.0, 0.05, help="0.0なら固定金利。")
+            h_rate_max = st.number_input("上限金利 (%)", 0.0, 20.0, 4.0, 0.1, help="設定した金利以上には上がりません")
         
         loan_principal = h_price - h_down
         if loan_principal > 0:
-            schedule_list, base_pmt = calculate_loan_schedule(loan_principal, h_years, h_rate, h_rate_inc)
+            schedule_list, base_pmt = calculate_loan_schedule(loan_principal, h_years, h_rate, h_rate_inc, h_rate_max)
             schedule_dict = {h_age + item["year"]: item for item in schedule_list}
             housing_info = {
                 "type": "future", "base_pmt": base_pmt, "schedule": schedule_dict,
@@ -162,10 +157,10 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             h_rate = st.number_input("現在の金利 (%)", 0.0, 10.0, 1.5, 0.1)
             h_rate_inc = st.number_input("毎年の金利上昇幅 (%)", 0.0, 2.0, 0.0, 0.05, help="0.0なら固定金利")
         with h_col3:
-            st.empty() # レイアウト調整用
+            h_rate_max = st.number_input("上限金利 (%)", 0.0, 20.0, 4.0, 0.1, help="設定した金利以上には上がりません")
         
         if loan_principal > 0:
-            schedule_list, base_pmt = calculate_loan_schedule(loan_principal, h_years_remain, h_rate, h_rate_inc)
+            schedule_list, base_pmt = calculate_loan_schedule(loan_principal, h_years_remain, h_rate, h_rate_inc, h_rate_max)
             schedule_dict = {current_age + item["year"]: item for item in schedule_list}
             housing_info = {
                 "type": "already", "base_pmt": base_pmt, "schedule": schedule_dict,
@@ -175,135 +170,76 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
 
     # --- 年金設定 ---
     st.markdown("---")
-    st.markdown("##### 👴 年金設定")
     use_pension = st.checkbox("年金を考慮する", value=True)
     if use_pension:
         p_col1, p_col2 = st.columns(2)
-        with p_col1:
-            pension_start_age = st.number_input("年金受給開始年齢", 60, 75, 65)
-        with p_col2:
-            pension_annual = st.number_input("世帯年金の受給額 (年額・万円)", 0, 1000, 240)
+        with p_col1: pension_start_age = st.number_input("受給開始年齢", 60, 75, 65)
+        with p_col2: pension_annual = st.number_input("受給額 (年額・万円)", 0, 1000, 240)
     else:
         pension_start_age = 65; pension_annual = 0
 
-# 計算用数値
 real_mean_return = (mean_return_pct / 100) - (inflation_rate_pct / 100)
 risk_std = risk_std_pct / 100
 
 st.divider()
 
 # ==========================================
-# データ管理
+# データ管理 (ライフステージ、イベント、子供)
 # ==========================================
 if "phases_list" not in st.session_state:
-    st.session_state.phases_list = [
-        {"end": 45, "amount": 100},
-        {"end": 60, "amount": 200},
-        {"end": 65, "amount": 100},
-        {"end": 100, "amount": -100}, 
-    ]
+    st.session_state.phases_list = [{"end": 45, "amount": 100}, {"end": 60, "amount": 200}, {"end": 65, "amount": 100}, {"end": 100, "amount": -100}]
 if "events_list" not in st.session_state:
-    st.session_state.events_list = [
-        {"age": 60, "amount": 1500, "name": "退職金"},
-        {"age": 40, "amount": -300, "name": "車購入"},
-    ]
+    st.session_state.events_list = [{"age": 60, "amount": 1500, "name": "退職金"}, {"age": 40, "amount": -300, "name": "車購入"}]
 if "children_list" not in st.session_state:
-    st.session_state.children_list = [
-        {"age": 5, "course": "private_uni"}, 
-        {"age": 2, "course": "private_uni"}
-    ]
+    st.session_state.children_list = [{"age": 5, "course": "private_uni"}, {"age": 2, "course": "private_uni"}]
 
-# コールバック関数
-def add_phase():
-    last_end = st.session_state.phases_list[-1]["end"] if st.session_state.phases_list else current_age
-    st.session_state.phases_list.append({"end": last_end + 5, "amount": 0})
+def add_phase(): st.session_state.phases_list.append({"end": (st.session_state.phases_list[-1]["end"] if st.session_state.phases_list else current_age) + 5, "amount": 0})
 def remove_phase():
     if len(st.session_state.phases_list) > 1: st.session_state.phases_list.pop()
-def add_event():
-    st.session_state.events_list.append({"age": current_age + 5, "amount": -100, "name": "新しいイベント"})
-def remove_event(index):
-    st.session_state.events_list.pop(index)
-def add_child():
-    st.session_state.children_list.append({"age": 0, "course": "private_uni"})
-def remove_child(index):
-    st.session_state.children_list.pop(index)
+def add_event(): st.session_state.events_list.append({"age": current_age + 5, "amount": -100, "name": "新イベント"})
+def remove_event(index): st.session_state.events_list.pop(index)
+def add_child(): st.session_state.children_list.append({"age": 0, "course": "private_uni"})
+def remove_child(index): st.session_state.children_list.pop(index)
 
-# ==========================================
-# 入力エリア
-# ==========================================
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支")
-    st.info("💡 **現在の住居費（家賃やローン返済額）を含んだ**、年間の収支を入力してください。")
     start_age_tracker = current_age
     for i, phase in enumerate(st.session_state.phases_list):
-        st.markdown(f"**🔹 第{i+1}期間 ({start_age_tracker}歳 〜 )**")
         c_p1, c_p2 = st.columns([1, 1])
         with c_p1:
-            min_val = start_age_tracker
-            current_end_val = int(phase["end"])
-            if current_end_val < min_val: current_end_val = min_val
-            new_end = st.number_input(f"何歳まで？ (第{i+1}期間)", min_value=min_val, max_value=150, value=current_end_val, key=f"phase_end_{i}")
-            st.session_state.phases_list[i]["end"] = new_end
+            st.session_state.phases_list[i]["end"] = st.number_input(f"終了年齢 (第{i+1}期)", start_age_tracker, 150, max(start_age_tracker, int(phase["end"])), key=f"p_end_{i}")
         with c_p2:
-            new_amount = st.number_input(f"年間の収支 (万円)", value=int(phase["amount"]), key=f"phase_amount_{i}")
-            st.session_state.phases_list[i]["amount"] = new_amount
-        start_age_tracker = new_end + 1
-        st.markdown("---")
+            st.session_state.phases_list[i]["amount"] = st.number_input(f"年間収支 (万円)", value=int(phase["amount"]), key=f"p_amt_{i}")
+        start_age_tracker = st.session_state.phases_list[i]["end"] + 1
     b_col1, b_col2 = st.columns(2)
     with b_col1: st.button("➕ 期間を追加", on_click=add_phase, use_container_width=True)
     with b_col2: st.button("🗑️ 最後の期間を削除", on_click=remove_phase, use_container_width=True)
 
 with col2:
-    st.subheader("2. 子供の教育費 (自動計算)")
-    st.info("お子様の年齢を入れると、学費を自動で収支から引きます。")
+    st.subheader("2. 子供の教育費")
     for i, child in enumerate(st.session_state.children_list):
         with st.container(border=True):
-            c_head1, c_head2 = st.columns([2, 1])
-            with c_head1: st.markdown(f"**👶 お子様 {i+1}**")
-            with c_head2:
-                if st.button("🗑️ 削除", key=f"del_child_{i}"): remove_child(i); st.rerun()
-            c_in1, c_in2 = st.columns(2)
-            with c_in1:
-                new_age = st.number_input("現在の年齢", 0, 30, int(child["age"]), key=f"child_age_{i}")
-                st.session_state.children_list[i]["age"] = new_age
+            c_in1, c_in2, c_in3 = st.columns([1.5, 2.5, 1])
+            with c_in1: st.session_state.children_list[i]["age"] = st.number_input("現在年齢", 0, 30, int(child["age"]), key=f"c_age_{i}")
             with c_in2:
-                course_opts = {
-                    "all_public": "国公立大 (標準)", 
-                    "private_uni": "私立大学 (平均)", 
-                    "private_from_jr": "中学から私立 (〜私立大)", 
-                    "all_private": "すべて私立 (手厚い)", 
-                    "medical_private": "私立医学部 (6年)",
-                    "study_abroad": "海外大学留学 (4年)",
-                    "vocational": "専門学校 (2年)", 
-                    "junior_college": "短期大学 (2年)", 
-                    "high_school_grad": "高校卒業まで"
-                }
-                current_c = child["course"] if child["course"] in course_opts else "private_uni"
-                new_course = st.selectbox("進学コース", options=list(course_opts.keys()), format_func=lambda x: course_opts[x], index=list(course_opts.keys()).index(current_c), key=f"child_course_{i}")
-                st.session_state.children_list[i]["course"] = new_course
+                opts = {"all_public": "国公立大", "private_uni": "私立大学", "private_from_jr": "中学から私立", "all_private": "すべて私立", "vocational": "専門", "junior_college": "短大", "study_abroad": "海外留学", "medical_private": "私立医学部", "high_school_grad": "高卒"}
+                st.session_state.children_list[i]["course"] = st.selectbox("コース", list(opts.keys()), format_func=lambda x: opts[x], index=list(opts.keys()).index(child["course"] if child["course"] in opts else "private_uni"), key=f"c_crs_{i}")
+            with c_in3:
+                if st.button("削除", key=f"del_c_{i}"): remove_child(i); st.rerun()
     st.button("➕ 子供を追加", on_click=add_child, use_container_width=True)
     
     st.divider()
-    st.subheader("3. その他のイベント・一時金")
+    st.subheader("3. イベント・一時金")
     for i, event in enumerate(st.session_state.events_list):
-        with st.container(border=True):
-            e_col1, e_col2 = st.columns([2, 1])
-            with e_col1: st.markdown(f"**イベント {i+1}**")
-            with e_col2:
-                if st.button("🗑️ 削除", key=f"del_event_{i}"): remove_event(i); st.rerun()
-            e_in1, e_in2, e_in3 = st.columns([1, 1, 1.5])
-            with e_in1:
-                new_age = st.number_input("年齢", min_value=0, max_value=150, value=int(event["age"]), key=f"ev_age_{i}")
-                st.session_state.events_list[i]["age"] = new_age
-            with e_in2:
-                new_amt = st.number_input("金額(万円)", value=int(event["amount"]), key=f"ev_amt_{i}")
-                st.session_state.events_list[i]["amount"] = new_amt
-            with e_in3:
-                new_name = st.text_input("内容", value=event["name"], key=f"ev_name_{i}")
-                st.session_state.events_list[i]["name"] = new_name
-    st.button("➕ イベントを追加", on_click=add_event, use_container_width=True)
+        e_in1, e_in2, e_in3, e_in4 = st.columns([1, 1, 1.5, 0.8])
+        with e_in1: st.session_state.events_list[i]["age"] = st.number_input("年齢", 0, 150, int(event["age"]), key=f"e_age_{i}")
+        with e_in2: st.session_state.events_list[i]["amount"] = st.number_input("万円", value=int(event["amount"]), key=f"e_amt_{i}")
+        with e_in3: st.session_state.events_list[i]["name"] = st.text_input("内容", value=event["name"], key=f"e_name_{i}")
+        with e_in4: 
+            if st.button("削除", key=f"del_e_{i}"): remove_event(i); st.rerun()
+    st.button("➕ イベント追加", on_click=add_event, use_container_width=True)
 
 # ==========================================
 # シミュレーション実行
@@ -321,14 +257,14 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             
             # 1. 基本収支マップ
             cashflow_map = {}
-            temp_start = current_age
+            t_start = current_age
             for p in st.session_state.phases_list:
                 end_val = int(p["end"])
                 amount_val = int(p["amount"])
-                if temp_start <= end_val:
-                    for age in range(temp_start, end_val + 1):
+                if t_start <= end_val:
+                    for age in range(t_start, end_val + 1):
                         cashflow_map[age] = amount_val
-                temp_start = end_val + 1
+                t_start = end_val + 1
 
             # 2. 教育費の控除
             education_cost_map = {}
@@ -352,10 +288,8 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 if use_pension and age >= pension_start_age:
                     cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
                 
-                # ★ローンキャッシュフローへの反映
                 if housing_info["type"] == "already":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
-                        # 返済中は金利上昇による差額をマイナス
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
                         cashflow_map[age] = cashflow_map.get(age, 0) + (housing_info["base_pmt"] - actual_pmt)
                     elif age > housing_info["end_age"]:
@@ -363,7 +297,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 
                 elif housing_info["type"] == "future":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
-                        # 返済中は家賃浮き分プラス＆実際の返済額マイナス
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"] - actual_pmt
                     elif age > housing_info["end_age"]:
@@ -374,7 +307,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             for e in st.session_state.events_list:
                 event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
             
-            # --- シミュレーション計算 (高速化版) ---
+            # --- シミュレーション計算 ---
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
             
@@ -431,7 +364,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             if total_edu > 0: st.info(f"🎓 **教育費**: 総額 約 {total_edu:,} 万円 を考慮済")
             if use_pension: st.success(f"👴 **年金**: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
             if housing_info["type"] != "none":
-                total_loan = sum([h["annual_pmt"] for h in housing_info["schedule"].values()])
+                total_loan = sum([item["annual_pmt"] for item in housing_info["schedule"].values()])
                 st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。完済後は収支が改善します。")
 
             with st.expander("🔰 数字の見方ガイド", expanded=True):
@@ -518,7 +451,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 c_vals.append(f"{int(principal_assets[idx]):,} 万円" if idx < len(principal_assets) else "-")
                 r_data[col] = c_vals
 
-            # ★ ヘッダーを固定するために set_index を使用
+            # ヘッダー固定表示
             df_dist = pd.DataFrame(d_data)
             df_dist.set_index("ランク", inplace=True)
             st.dataframe(df_dist, use_container_width=True)
@@ -563,7 +496,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 total_row["教育費合計"] = f"{grand_total:,}万円"
                 edu_rows.append(total_row)
                 
-                # ★ ヘッダー固定
+                # ヘッダー固定表示
                 df_edu = pd.DataFrame(edu_rows)
                 df_edu.set_index("親の年齢", inplace=True)
                 st.dataframe(df_edu, use_container_width=True)
@@ -573,8 +506,9 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # --- 表3: 住宅ローン内訳 ---
             if housing_info["type"] != "none":
                 st.divider()
-                st.subheader("🏠 住宅ローン返済の内訳詳細 (金利変動対応)")
+                st.subheader("🏠 住宅ローン返済の内訳詳細 (金利変動・上限対応)")
                 loan_rows = []
+                grand_total_loan = 0
 
                 for y in range(years + 1):
                     p_age = current_age + y
@@ -582,11 +516,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     if p_age <= housing_info["end_age"] + 3:
                         if housing_info["start_age"] <= p_age <= housing_info["end_age"]:
                             info = housing_info["schedule"][p_age]
+                            pmt = int(info['annual_pmt'])
+                            grand_total_loan += pmt
                             loan_rows.append({
                                 "年齢": f"{p_age}歳",
                                 "状態": "返済中",
                                 "適用金利": f"{info['rate']:.2f} %",
-                                "年間返済額": f"{int(info['annual_pmt']):,} 万円",
+                                "年間返済額": f"{pmt:,} 万円",
                                 "年末残高": f"{int(info['balance']):,} 万円"
                             })
                         elif p_age > housing_info["end_age"]:
@@ -607,10 +543,17 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                             })
                 
                 if loan_rows:
-                    # ★ ヘッダー固定
+                    loan_rows.append({
+                        "年齢": "合計",
+                        "状態": "",
+                        "適用金利": "",
+                        "年間返済額": f"{grand_total_loan:,} 万円",
+                        "年末残高": ""
+                    })
+                    # ヘッダー固定表示
                     df_loan = pd.DataFrame(loan_rows)
                     df_loan.set_index("年齢", inplace=True)
                     st.dataframe(df_loan, use_container_width=True)
 
     except Exception as e:
-        st.error(f"エラー: {e}")
+        st.error(f"エラーが発生しました: {e}")
