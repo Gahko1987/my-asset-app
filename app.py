@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import japanize_matplotlib
 import matplotlib.ticker as ticker
+import urllib.parse  # ★追加: URLエンコード用
 
 # ページ設定
 st.set_page_config(page_title="資産ライフプランシミュレーター", layout="wide")
@@ -205,6 +206,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. ライフステージ収支")
+    st.info("💡 **現在の住居費（家賃やローン返済額）を含んだ**、年間の収支を入力してください。")
     start_age_tracker = current_age
     for i, phase in enumerate(st.session_state.phases_list):
         c_p1, c_p2 = st.columns([1, 1])
@@ -254,6 +256,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             num_simulations = 10000 
             cashflow_map = {}
             
+            # 1. ライフステージ収支
             t_start = current_age
             for p in st.session_state.phases_list:
                 end_val = int(p["end"])
@@ -263,6 +266,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[age] = amount_val
                 t_start = end_val + 1
 
+            # 2. 教育費の控除
             education_cost_map = {}
             for child in st.session_state.children_list:
                 c_age = child["age"]
@@ -277,29 +281,38 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                         cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
                         education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
 
+            # 3. 年金 & 住宅ローン(変動対応)
             for y in range(years + 1):
                 age = current_age + y
                 if use_pension and age >= pension_start_age:
                     cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
                 
+                # すでに購入済みの場合
                 if housing_info["type"] == "already":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
+                        # ベース(今の返済額)と実際の返済額の差額だけマイナスする
                         cashflow_map[age] = cashflow_map.get(age, 0) + (housing_info["base_pmt"] - actual_pmt)
                     elif age > housing_info["end_age"]:
+                        # 完済後は今の返済額分がまるまるプラスに
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["base_pmt"]
                 
+                # これから購入予定の場合
                 elif housing_info["type"] == "future":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
+                        # 家賃が浮く分プラスし、実際の返済額を全額マイナスする
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"] - actual_pmt
                     elif age > housing_info["end_age"]:
+                        # 完済後は家賃浮き分だけがずっとプラスに
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"]
 
+            # 4. イベントマップ
             event_map = {}
             for e in st.session_state.events_list:
                 event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
             
+            # --- シミュレーション計算 (高速化版) ---
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
             
@@ -314,6 +327,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             progress_bar = st.progress(0)
             
             for year in range(years):
+                # 単純計算用
                 prev_d = deterministic_assets[-1]
                 if prev_d <= 0: new_d = 0
                 else:
@@ -321,11 +335,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     if new_d < 0: new_d = 0
                 deterministic_assets.append(new_d)
                 
+                # 元本計算用
                 prev_p = principal_assets[-1]
                 new_p = prev_p + total_flows[year]
                 if new_p < 0: new_p = 0
                 principal_assets.append(new_p)
 
+                # モンテカルロ計算用（一括処理）
                 prev_assets = simulation_results[:, year]
                 active_mask = prev_assets > 0
                 
@@ -334,10 +350,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 new_assets[new_assets < 0] = 0
                 
                 simulation_results[:, year + 1] = new_assets
-                if year % 5 == 0: progress_bar.progress((year + 1) / years)
+                
+                if year % 5 == 0:
+                    progress_bar.progress((year + 1) / years)
                     
             progress_bar.progress(1.0)
 
+            # --- 結果集計 ---
             median_res = np.percentile(simulation_results, 50, axis=0)
             top_20_res = np.percentile(simulation_results, 80, axis=0)
             bottom_20_res = np.percentile(simulation_results, 20, axis=0)
@@ -348,9 +367,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             total_edu = sum(education_cost_map.values())
             if total_edu > 0: st.info(f"🎓 **教育費**: 総額 約 {total_edu:,} 万円 を考慮済")
             if use_pension: st.success(f"👴 **年金**: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
+            
             if housing_info["type"] != "none":
+                # ローンの総支払額を計算
                 total_loan = sum([item["annual_pmt"] for item in housing_info["schedule"].values()])
-                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。完済後は収支が改善します。")
+                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。総支払額は約 {int(total_loan):,} 万円 です。")
+
+            with st.expander("🔰 数字の見方ガイド", expanded=True):
+                st.markdown("""
+                * **生存率**: 資産が底をつかない確率。80%以上が目安。
+                * **好調/不調**: **上位20%** と **下位20%** のラインを表示。
+                * **積立元本(グレー)**: 投資をせず、貯金だけで推移した場合の金額。
+                """)
 
             c1, c2, c3, c4 = st.columns(4)
             c1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
@@ -358,6 +386,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             c3.metric("中央値", f"{int(median_res[-1]):,}万")
             c4.metric("不調時 (下位20%)", f"{int(bottom_20_res[-1]):,}万")
 
+            # グラフ
             fig, ax = plt.subplots(figsize=(10, 6))
             age_axis = np.arange(current_age, end_age + 1)
             
@@ -368,6 +397,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 age = current_age + y
                 flow = cashflow_map.get(age, 0)
                 if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
+                
                 if housing_info["type"] != "none":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                          ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
@@ -385,8 +415,48 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             ax.grid(True, linestyle='--', alpha=0.7)
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
             st.pyplot(fig)
+            
+            st.caption("※ グラフ背景の色について：")
+            st.caption("🟦 **水色**: 教育費がかかる期間")
+            st.caption("🟧 **オレンジ**: 収支が赤字（貯金取崩し）の期間")
+            st.caption("🟩 **緑色**: 上記2つが重なっている期間（教育費負担があり、かつ赤字の期間）")
+            st.caption("🟪 **紫の帯(下部)**: 住宅ローン返済期間")
+
+            # ==========================================
+            # ★ AI相談機能（ChatGPT連携）
+            # ==========================================
+            st.divider()
+            st.subheader("🤖 AI（ChatGPT）にシミュレーション結果を相談する")
+            st.info("以下のボタンを押すとChatGPTが起動し、今回の結果を元にしたアドバイスを自動でリクエストします。")
+            
+            prompt_text = f"""あなたは優秀なファイナンシャルプランナー（FP）です。
+以下の家計シミュレーション結果をもとに、具体的な改善アドバイスを提示してください。
+
+【基本情報】
+・現在の年齢: {current_age}歳
+・現在の資産: {current_assets}万円
+・想定利回り: {mean_return_pct}% / インフレ率: {inflation_rate_pct}%
+
+【シミュレーション結果 ({end_age}歳時点)】
+・資産が底をつかない確率(生存率): {100 - ruin_prob:.1f}%
+・想定される資産額(中央値): {int(median_res[-1]):,}万円
+・最悪のケース(下位20%): {int(bottom_20_res[-1]):,}万円
+
+【相談内容】
+この結果を踏まえて、将来の家計破綻リスクを減らし、より安心できるライフプランを築くための具体的なアクションプランや見直しポイントを3つ教えてください。
+"""
+            # URLエンコードしてChatGPTのリンクを生成
+            encoded_prompt = urllib.parse.quote(prompt_text)
+            chatgpt_url = f"https://chatgpt.com/?q={encoded_prompt}"
+            
+            st.link_button("💬 ChatGPTを開いて相談する", chatgpt_url, type="primary")
+            
+            with st.expander("送信されるプロンプト（相談内容）を確認・手動コピーする"):
+                st.text_area("以下の内容がChatGPTに送信されます", value=prompt_text, height=250)
 
             st.divider()
+            
+            # --- 表1: 資産額分布 (1歳ごと) ---
             st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
             
             step = 1 
@@ -419,10 +489,17 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 c_vals.append(f"{int(principal_assets[idx]):,} 万円" if idx < len(principal_assets) else "-")
                 r_data[col] = c_vals
 
+            # ヘッダー固定表示
             df_dist = pd.DataFrame(d_data)
             df_dist.set_index("ランク", inplace=True)
             st.dataframe(df_dist, use_container_width=True)
+            
+            st.caption("👇 比較用データ")
+            df_ref = pd.DataFrame(r_data)
+            df_ref.set_index("指標", inplace=True)
+            st.dataframe(df_ref, use_container_width=True)
 
+            # --- 表2: 教育費内訳 ---
             st.divider()
             st.subheader("🎓 教育費の内訳詳細")
             edu_rows = []
@@ -457,12 +534,14 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 total_row["教育費合計"] = f"{grand_total:,}万円"
                 edu_rows.append(total_row)
                 
+                # ヘッダー固定表示
                 df_edu = pd.DataFrame(edu_rows)
                 df_edu.set_index("親の年齢", inplace=True)
                 st.dataframe(df_edu, use_container_width=True)
             else:
                 st.info("教育費がかかる期間はありません。")
                 
+            # --- 表3: 住宅ローン内訳 ---
             if housing_info["type"] != "none":
                 st.divider()
                 st.subheader("🏠 住宅ローン返済の内訳詳細 (金利変動対応)")
@@ -484,13 +563,13 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                                 "状態": "返済中", 
                                 "適用金利": f"{info['rate']:.2f} %", 
                                 "年間返済額": f"{int(actual_pmt):,} 万円", 
-                                "増加分(収支マイナス)": f"+{int(increase):,} 万円" if increase > 0 else "0 万円",
+                                "増加分(収支マイナス)": f"▲ {int(increase):,} 万円" if increase > 0 else "0 万円",
                                 "年末残高": f"{int(info['balance']):,} 万円"
                             })
                         elif p_age > housing_info["end_age"]:
                             loan_rows.append({
                                 "年齢": f"{p_age}歳", 
-                                "状態": "完済", 
+                                "状態": "完済 🎉", 
                                 "適用金利": "-", 
                                 "年間返済額": "-", 
                                 "増加分(収支マイナス)": "-", 
