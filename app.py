@@ -16,6 +16,7 @@ st.title("📊 資産＆ライフプラン シミュレーター")
 EDU_COSTS = {
     "all_public": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "university": 120 },
     "private_uni": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "university": 172 },
+    "private_from_jr": { "kindergarten": 23, "elementary": 35, "junior_high": 144, "high_school": 105, "university": 172 }, # ★追加: 中学から私立
     "all_private": { "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, "university": 172 },
     "vocational": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "vocational_school": 130 },
     "junior_college": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "junior_college": 120 },
@@ -33,7 +34,8 @@ def get_school_stage(age, course_type):
     # 18歳以降の分岐
     if 18 <= age <= 23 and course_type == "medical_private": return "medical_uni"
     if 18 <= age <= 21:
-        if course_type in ["all_public", "private_uni", "all_private"]: return "university"
+        # ★追加: "private_from_jr"も大学4年間の対象に
+        if course_type in ["all_public", "private_uni", "all_private", "private_from_jr"]: return "university"
         if course_type == "study_abroad": return "overseas_uni"
     if 18 <= age <= 19:
         if course_type == "vocational": return "vocational_school"
@@ -100,7 +102,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             h_rate = st.number_input("金利 (%)", 0.0, 10.0, 1.5, 0.1)
         with h_col3:
             h_years = st.number_input("返済期間 (年)", 1, 50, 35)
-            # 現在の家賃
             current_rent_val = st.number_input("現在の住居費 (家賃など・年額)", 0, 1000, 120, help="この金額が、購入後に収支からプラス（節約）されます")
         
         loan_principal = h_price - h_down
@@ -243,6 +244,7 @@ with col2:
                 course_opts = {
                     "all_public": "国公立大 (標準)", 
                     "private_uni": "私立大学 (平均)", 
+                    "private_from_jr": "中学から私立 (〜私立大)", # ★追加
                     "all_private": "すべて私立 (手厚い)", 
                     "medical_private": "私立医学部 (6年)",
                     "study_abroad": "海外大学留学 (4年)",
@@ -535,7 +537,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 for y in range(years + 1):
                     p_age = current_age + y
                     
-                    # 完済後3年くらいまで表示する（結果がスッキリするため）
+                    # 完済後3年くらいまで表示する
                     if p_age <= housing_info["end_age"] + 3:
                         pmt = 0
                         status = "-"
