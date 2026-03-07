@@ -16,7 +16,7 @@ st.title("📊 資産＆ライフプラン シミュレーター")
 EDU_COSTS = {
     "all_public": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "university": 120 },
     "private_uni": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "university": 172 },
-    "private_from_jr": { "kindergarten": 23, "elementary": 35, "junior_high": 144, "high_school": 105, "university": 172 }, # ★追加: 中学から私立
+    "private_from_jr": { "kindergarten": 23, "elementary": 35, "junior_high": 144, "high_school": 105, "university": 172 }, 
     "all_private": { "kindergarten": 36, "elementary": 170, "junior_high": 144, "high_school": 105, "university": 172 },
     "vocational": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "vocational_school": 130 },
     "junior_college": { "kindergarten": 23, "elementary": 35, "junior_high": 54, "high_school": 52, "junior_college": 120 },
@@ -34,7 +34,6 @@ def get_school_stage(age, course_type):
     # 18歳以降の分岐
     if 18 <= age <= 23 and course_type == "medical_private": return "medical_uni"
     if 18 <= age <= 21:
-        # ★追加: "private_from_jr"も大学4年間の対象に
         if course_type in ["all_public", "private_uni", "all_private", "private_from_jr"]: return "university"
         if course_type == "study_abroad": return "overseas_uni"
     if 18 <= age <= 19:
@@ -244,7 +243,7 @@ with col2:
                 course_opts = {
                     "all_public": "国公立大 (標準)", 
                     "private_uni": "私立大学 (平均)", 
-                    "private_from_jr": "中学から私立 (〜私立大)", # ★追加
+                    "private_from_jr": "中学から私立 (〜私立大)",
                     "all_private": "すべて私立 (手厚い)", 
                     "medical_private": "私立医学部 (6年)",
                     "study_abroad": "海外大学留学 (4年)",
@@ -343,22 +342,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
             
-            # 🚀 NumPyを使った高速ベクトル演算
             flows = np.array([cashflow_map.get(current_age + y, 0) for y in range(years)])
             spots = np.array([event_map.get(current_age + y, 0) for y in range(years)])
             total_flows = flows + spots
             
-            # 1万回×年数分 の乱数を一括生成
             random_returns = np.random.normal(real_mean_return, risk_std, (num_simulations, years))
             
-            # 結果を格納する配列
             simulation_results = np.zeros((num_simulations, years + 1))
             simulation_results[:, 0] = current_assets
             
             progress_bar = st.progress(0)
             
             for year in range(years):
-                # 単純計算用
                 prev_d = deterministic_assets[-1]
                 if prev_d <= 0: new_d = 0
                 else:
@@ -366,13 +361,11 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                     if new_d < 0: new_d = 0
                 deterministic_assets.append(new_d)
                 
-                # 元本計算用
                 prev_p = principal_assets[-1]
                 new_p = prev_p + total_flows[year]
                 if new_p < 0: new_p = 0
                 principal_assets.append(new_p)
 
-                # モンテカルロ計算用（一括処理）
                 prev_assets = simulation_results[:, year]
                 active_mask = prev_assets > 0
                 
@@ -453,9 +446,11 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
 
             st.divider()
             
-            # --- 表1: 資産額分布 (10歳刻み) ---
-            st.subheader("📋 詳細データ: 資産額の分布 (10歳刻み)")
-            step = 10
+            # --- 表1: 資産額分布 (1歳ごと) ---
+            st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
+            
+            # ★変更箇所: stepを1にして1歳ごとに変更
+            step = 1 
             t_ages = list(range(current_age, end_age + 1, step))
             if t_ages[-1] != end_age: t_ages.append(end_age)
             
@@ -537,7 +532,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 for y in range(years + 1):
                     p_age = current_age + y
                     
-                    # 完済後3年くらいまで表示する
                     if p_age <= housing_info["end_age"] + 3:
                         pmt = 0
                         status = "-"
