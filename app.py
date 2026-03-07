@@ -246,172 +246,273 @@ with col2:
 # ==========================================
 st.divider()
 if st.button("シミュレーションを実行する (10,000回)", type="primary"):
-    end_age = st.session_state.phases_list[-1]["end"] if st.session_state.phases_list else 100
-    years = end_age - current_age
-    
-    if years > 0:
-        num_simulations = 10000 
-        cashflow_map = {}
+    try:
+        end_age = st.session_state.phases_list[-1]["end"] if st.session_state.phases_list else 100
+        years = end_age - current_age
         
-        # 1. ライフステージ収支
-        t_start = current_age
-        for p in st.session_state.phases_list:
-            for a in range(t_start, int(p["end"]) + 1): cashflow_map[a] = int(p["amount"])
-            t_start = int(p["end"]) + 1
-
-        # 2. 教育費
-        education_cost_map = {}
-        for child in st.session_state.children_list:
-            for y in range(40): 
-                p_age = current_age + y
-                if p_age > end_age: break
-                stage = get_school_stage(child["age"] + y, child["course"])
-                if stage:
-                    cost = EDU_COSTS[child["course"]][stage]
-                    cashflow_map[p_age] = cashflow_map.get(p_age, 0) - cost
-                    education_cost_map[p_age] = education_cost_map.get(p_age, 0) + cost
-
-        # 3. 年金 & 住宅ローン(変動対応)
-        for y in range(years + 1):
-            age = current_age + y
-            if use_pension and age >= pension_start_age:
-                cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
+        if years > 0:
+            num_simulations = 10000 
+            cashflow_map = {}
             
-            if housing_info["type"] == "already":
-                if housing_info["start_age"] <= age <= housing_info["end_age"]:
-                    actual_pmt = housing_info["schedule"][age]["annual_pmt"]
-                    cashflow_map[age] = cashflow_map.get(age, 0) + (housing_info["base_pmt"] - actual_pmt)
-                elif age > housing_info["end_age"]:
-                    cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["base_pmt"]
+            t_start = current_age
+            for p in st.session_state.phases_list:
+                end_val = int(p["end"])
+                amount_val = int(p["amount"])
+                if t_start <= end_val:
+                    for age in range(t_start, end_val + 1):
+                        cashflow_map[age] = amount_val
+                t_start = end_val + 1
+
+            education_cost_map = {}
+            for child in st.session_state.children_list:
+                c_age = child["age"]
+                c_course = child["course"]
+                for y in range(40): 
+                    current_c_age = c_age + y
+                    parent_age = current_age + y
+                    if parent_age > end_age: break
+                    stage = get_school_stage(current_c_age, c_course)
+                    if stage:
+                        cost = EDU_COSTS[c_course][stage]
+                        cashflow_map[parent_age] = cashflow_map.get(parent_age, 0) - cost
+                        education_cost_map[parent_age] = education_cost_map.get(parent_age, 0) + cost
+
+            for y in range(years + 1):
+                age = current_age + y
+                if use_pension and age >= pension_start_age:
+                    cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
+                
+                if housing_info["type"] == "already":
+                    if housing_info["start_age"] <= age <= housing_info["end_age"]:
+                        actual_pmt = housing_info["schedule"][age]["annual_pmt"]
+                        cashflow_map[age] = cashflow_map.get(age, 0) + (housing_info["base_pmt"] - actual_pmt)
+                    elif age > housing_info["end_age"]:
+                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["base_pmt"]
+                
+                elif housing_info["type"] == "future":
+                    if housing_info["start_age"] <= age <= housing_info["end_age"]:
+                        actual_pmt = housing_info["schedule"][age]["annual_pmt"]
+                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"] - actual_pmt
+                    elif age > housing_info["end_age"]:
+                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"]
+
+            event_map = {}
+            for e in st.session_state.events_list:
+                event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
             
-            elif housing_info["type"] == "future":
-                if housing_info["start_age"] <= age <= housing_info["end_age"]:
-                    actual_pmt = housing_info["schedule"][age]["annual_pmt"]
-                    cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"] - actual_pmt
-                elif age > housing_info["end_age"]:
-                    cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"]
-
-        # 4. イベント
-        event_map = {int(e["age"]): event_map.get(int(e["age"]), 0) + int(e["amount"]) for e in st.session_state.events_list for event_map in [{}]}
-        for e in st.session_state.events_list: event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
-        
-        # モンテカルロ (高速版)
-        deterministic_assets, principal_assets = [current_assets], [current_assets]
-        flows = np.array([cashflow_map.get(current_age + y, 0) for y in range(years)])
-        spots = np.array([event_map.get(current_age + y, 0) for y in range(years)])
-        total_flows = flows + spots
-        
-        random_returns = np.random.normal(real_mean_return, risk_std, (num_simulations, years))
-        simulation_results = np.zeros((num_simulations, years + 1))
-        simulation_results[:, 0] = current_assets
-        
-        pb = st.progress(0)
-        for year in range(years):
-            prev_d = deterministic_assets[-1]
-            deterministic_assets.append(max(0, (prev_d + total_flows[year]) * (1 + real_mean_return)) if prev_d > 0 else 0)
-            principal_assets.append(max(0, principal_assets[-1] + total_flows[year]))
-
-            prev_a = simulation_results[:, year]
-            mask = prev_a > 0
-            new_a = np.zeros_like(prev_a)
-            new_a[mask] = (prev_a[mask] + total_flows[year]) * (1 + random_returns[mask, year])
-            new_a[new_a < 0] = 0
-            simulation_results[:, year + 1] = new_a
+            deterministic_assets = [current_assets]
+            principal_assets = [current_assets]
             
-            if year % 5 == 0: pb.progress((year + 1) / years)
-        pb.progress(1.0)
-
-        # --- グラフ表示 ---
-        median_res = np.percentile(simulation_results, 50, axis=0)
-        top_20_res = np.percentile(simulation_results, 80, axis=0)
-        bottom_20_res = np.percentile(simulation_results, 20, axis=0)
-        ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
-
-        st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
-        c2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
-        c3.metric("中央値", f"{int(median_res[-1]):,}万")
-        c4.metric("不調時", f"{int(bottom_20_res[-1]):,}万")
-
-        fig, ax = plt.subplots(figsize=(10, 5))
-        age_axis = np.arange(current_age, end_age + 1)
-        ax.plot(age_axis, principal_assets, color='gray', label='積立元本')
-        ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
-        ax.plot(age_axis, top_20_res, color='green', linestyle='--', label='好調')
-        ax.plot(age_axis, bottom_20_res, color='red', linestyle='--', label='不調')
-        ax.legend(); ax.grid(True, linestyle='--', alpha=0.7)
-        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
-        st.pyplot(fig)
-
-        # --- 各種詳細テーブル ---
-        st.divider()
-        st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
-        d_data = {"ランク": ["上位 10%", "11% - 20%", "21% - 30%", "31% - 40%", "41% - 50% (中央)", "51% - 60%", "61% - 70%", "71% - 80%", "81% - 90%", "91% - 100% (下位)"]}
-        ranges = [(90, 100), (80, 90), (70, 80), (60, 70), (50, 60), (40, 50), (30, 40), (20, 30), (10, 20), (0, 10)]
-        for y in range(years + 1):
-            age = current_age + y
-            vals = np.sort(simulation_results[:, y])
-            col_vals = []
-            for s, e in ranges:
-                subset = vals[int(num_simulations * s / 100):int(num_simulations * e / 100)]
-                col_vals.append(f"{int(np.mean(subset)):,} 万円" if len(subset) > 0 else "0 万円")
-            d_data[f"{age}歳"] = col_vals
+            flows = np.array([cashflow_map.get(current_age + y, 0) for y in range(years)])
+            spots = np.array([event_map.get(current_age + y, 0) for y in range(years)])
+            total_flows = flows + spots
             
-        df_dist = pd.DataFrame(d_data)
-        df_dist.set_index("ランク", inplace=True)
-        st.dataframe(df_dist, use_container_width=True)
+            random_returns = np.random.normal(real_mean_return, risk_std, (num_simulations, years))
+            simulation_results = np.zeros((num_simulations, years + 1))
+            simulation_results[:, 0] = current_assets
+            
+            progress_bar = st.progress(0)
+            
+            for year in range(years):
+                prev_d = deterministic_assets[-1]
+                if prev_d <= 0: new_d = 0
+                else:
+                    new_d = (prev_d + total_flows[year]) * (1 + real_mean_return)
+                    if new_d < 0: new_d = 0
+                deterministic_assets.append(new_d)
+                
+                prev_p = principal_assets[-1]
+                new_p = prev_p + total_flows[year]
+                if new_p < 0: new_p = 0
+                principal_assets.append(new_p)
 
-        if housing_info["type"] != "none":
+                prev_assets = simulation_results[:, year]
+                active_mask = prev_assets > 0
+                
+                new_assets = np.zeros_like(prev_assets)
+                new_assets[active_mask] = (prev_assets[active_mask] + total_flows[year]) * (1 + random_returns[active_mask, year])
+                new_assets[new_assets < 0] = 0
+                
+                simulation_results[:, year + 1] = new_assets
+                if year % 5 == 0: progress_bar.progress((year + 1) / years)
+                    
+            progress_bar.progress(1.0)
+
+            median_res = np.percentile(simulation_results, 50, axis=0)
+            top_20_res = np.percentile(simulation_results, 80, axis=0)
+            bottom_20_res = np.percentile(simulation_results, 20, axis=0)
+            ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
+
+            st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
+            
+            total_edu = sum(education_cost_map.values())
+            if total_edu > 0: st.info(f"🎓 **教育費**: 総額 約 {total_edu:,} 万円 を考慮済")
+            if use_pension: st.success(f"👴 **年金**: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
+            if housing_info["type"] != "none":
+                total_loan = sum([item["annual_pmt"] for item in housing_info["schedule"].values()])
+                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。完済後は収支が改善します。")
+
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
+            c2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
+            c3.metric("中央値", f"{int(median_res[-1]):,}万")
+            c4.metric("不調時 (下位20%)", f"{int(bottom_20_res[-1]):,}万")
+
+            fig, ax = plt.subplots(figsize=(10, 6))
+            age_axis = np.arange(current_age, end_age + 1)
+            
+            for age, cost in education_cost_map.items():
+                if cost > 0: ax.axvspan(age, age+1, color='cyan', alpha=0.1)
+            
+            for y in range(years):
+                age = current_age + y
+                flow = cashflow_map.get(age, 0)
+                if flow < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
+                if housing_info["type"] != "none":
+                    if housing_info["start_age"] <= age <= housing_info["end_age"]:
+                         ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
+
+            ax.plot(age_axis, principal_assets, color='gray', linewidth=2, linestyle='-', label='積立元本')
+            ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
+            ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
+            ax.plot(age_axis, top_20_res, color='green', linestyle='--', linewidth=1, label='好調 (上位20%)')
+            ax.plot(age_axis, bottom_20_res, color='red', linestyle='--', linewidth=1, label='不調 (下位20%)')
+            
+            ax.set_title("資産推移", fontsize=14)
+            ax.set_xlabel("年齢")
+            ax.set_ylabel("資産額 (万円)")
+            ax.legend()
+            ax.grid(True, linestyle='--', alpha=0.7)
+            ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
+            st.pyplot(fig)
+
             st.divider()
-            st.subheader("🏠 住宅ローン返済の内訳詳細 (金利変動対応)")
-            loan_rows = []
+            st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
             
+            step = 1 
+            t_ages = list(range(current_age, end_age + 1, step))
+            if t_ages[-1] != end_age: t_ages.append(end_age)
+            
+            ranges = [
+                (90, 100, "上位 10%"), (80, 90, "11% - 20%"), (70, 80, "21% - 30%"), (60, 70, "31% - 40%"),
+                (50, 60, "41% - 50% (中央)"), (40, 50, "51% - 60%"), (30, 40, "61% - 70%"), (20, 30, "71% - 80%"),
+                (10, 20, "81% - 90%"), (0, 10, "91% - 100% (下位)")
+            ]
+            
+            d_data = {"ランク": [r[2] for r in ranges]}
+            r_data = {"指標": ["単純計算", "積立元本"]}
+
+            for ta in t_ages:
+                col = f"{ta}歳"
+                idx = ta - current_age
+                vals = np.sort(simulation_results[:, idx])
+                col_vals = []
+                for s, e, _ in ranges:
+                    idx_s, idx_e = int(num_simulations * s / 100), int(num_simulations * e / 100)
+                    subset = vals[idx_s:idx_e]
+                    avg = np.mean(subset) if len(subset) > 0 else 0
+                    col_vals.append(f"{int(avg):,} 万円")
+                d_data[col] = col_vals
+                
+                c_vals = []
+                c_vals.append(f"{int(deterministic_assets[idx]):,} 万円" if idx < len(deterministic_assets) else "-")
+                c_vals.append(f"{int(principal_assets[idx]):,} 万円" if idx < len(principal_assets) else "-")
+                r_data[col] = c_vals
+
+            df_dist = pd.DataFrame(d_data)
+            df_dist.set_index("ランク", inplace=True)
+            st.dataframe(df_dist, use_container_width=True)
+
+            st.divider()
+            st.subheader("🎓 教育費の内訳詳細")
+            edu_rows = []
+            grand_total = 0
+            c_totals = [0]*len(st.session_state.children_list)
+
             for y in range(years + 1):
                 p_age = current_age + y
-                if p_age <= housing_info["end_age"] + 3:
-                    if housing_info["start_age"] <= p_age <= housing_info["end_age"]:
-                        info = housing_info["schedule"][p_age]
-                        base_pmt = housing_info["base_pmt"]
-                        actual_pmt = info["annual_pmt"]
-                        
-                        # 金利上昇によって増えた支払額（初年度返済額からの差額）
-                        increase = max(0, actual_pmt - base_pmt)
-                        
-                        loan_rows.append({
-                            "年齢": f"{p_age}歳", 
-                            "状態": "返済中", 
-                            "適用金利": f"{info['rate']:.2f} %", 
-                            "年間返済額": f"{int(actual_pmt):,} 万円", 
-                            "増加分(収支マイナス)": f"+{int(increase):,} 万円" if increase > 0 else "0 万円",
-                            "年末残高": f"{int(info['balance']):,} 万円"
-                        })
-                    elif p_age > housing_info["end_age"]:
-                        loan_rows.append({
-                            "年齢": f"{p_age}歳", 
-                            "状態": "完済", 
-                            "適用金利": "-", 
-                            "年間返済額": "-", 
-                            "増加分(収支マイナス)": "-", 
-                            "年末残高": "-"
-                        })
-                    elif p_age < housing_info["start_age"]:
-                        loan_rows.append({
-                            "年齢": f"{p_age}歳", 
-                            "状態": "購入前", 
-                            "適用金利": "-", 
-                            "年間返済額": "-", 
-                            "増加分(収支マイナス)": "-", 
-                            "年末残高": "-"
-                        })
-                        
-            if loan_rows:
-                df_loan = pd.DataFrame(loan_rows)
-                df_loan.set_index("年齢", inplace=True)
-                st.dataframe(df_loan, use_container_width=True)
+                y_tot = 0
+                row = {"親の年齢": f"{p_age}歳"}
+                has = False
+                for i, child in enumerate(st.session_state.children_list):
+                    c_age = child["age"] + y
+                    stg = get_school_stage(c_age, child["course"])
+                    if stg:
+                        cost = EDU_COSTS[child["course"]][stg]
+                        y_tot += cost
+                        c_totals[i] += cost
+                        grand_total += cost
+                        sn = STAGE_NAMES.get(stg, stg)
+                        row[f"子供{i+1}"] = f"{c_age}歳({sn}): {cost}万"
+                        has = True
+                    else:
+                        row[f"子供{i+1}"] = "-"
+                if has:
+                    row["教育費合計"] = f"▲{y_tot}万円"
+                    edu_rows.append(row)
+            
+            if edu_rows:
+                total_row = {"親の年齢": "合計"}
+                for i, t in enumerate(c_totals): total_row[f"子供{i+1}"] = f"{t:,}万円"
+                total_row["教育費合計"] = f"{grand_total:,}万円"
+                edu_rows.append(total_row)
+                
+                df_edu = pd.DataFrame(edu_rows)
+                df_edu.set_index("親の年齢", inplace=True)
+                st.dataframe(df_edu, use_container_width=True)
+            else:
+                st.info("教育費がかかる期間はありません。")
+                
+            if housing_info["type"] != "none":
+                st.divider()
+                st.subheader("🏠 住宅ローン返済の内訳詳細 (金利変動対応)")
+                loan_rows = []
+                
+                for y in range(years + 1):
+                    p_age = current_age + y
+                    if p_age <= housing_info["end_age"] + 3:
+                        if housing_info["start_age"] <= p_age <= housing_info["end_age"]:
+                            info = housing_info["schedule"][p_age]
+                            base_pmt = housing_info["base_pmt"]
+                            actual_pmt = info["annual_pmt"]
+                            
+                            # 金利上昇によって増えた支払額（初年度返済額からの差額）
+                            increase = max(0, actual_pmt - base_pmt)
+                            
+                            loan_rows.append({
+                                "年齢": f"{p_age}歳", 
+                                "状態": "返済中", 
+                                "適用金利": f"{info['rate']:.2f} %", 
+                                "年間返済額": f"{int(actual_pmt):,} 万円", 
+                                "増加分(収支マイナス)": f"+{int(increase):,} 万円" if increase > 0 else "0 万円",
+                                "年末残高": f"{int(info['balance']):,} 万円"
+                            })
+                        elif p_age > housing_info["end_age"]:
+                            loan_rows.append({
+                                "年齢": f"{p_age}歳", 
+                                "状態": "完済", 
+                                "適用金利": "-", 
+                                "年間返済額": "-", 
+                                "増加分(収支マイナス)": "-", 
+                                "年末残高": "-"
+                            })
+                        elif p_age < housing_info["start_age"]:
+                            loan_rows.append({
+                                "年齢": f"{p_age}歳", 
+                                "状態": "購入前", 
+                                "適用金利": "-", 
+                                "年間返済額": "-", 
+                                "増加分(収支マイナス)": "-", 
+                                "年末残高": "-"
+                            })
+                            
+                if loan_rows:
+                    df_loan = pd.DataFrame(loan_rows)
+                    df_loan.set_index("年齢", inplace=True)
+                    st.dataframe(df_loan, use_container_width=True)
 
-    else:
-        st.error("終了年齢は現在の年齢より大きくしてください。")
+        else:
+            st.error("終了年齢は現在の年齢より大きくしてください。")
 
-except Exception as e:
-    st.error(f"エラーが発生しました: {e}")
+    except Exception as e:
+        st.error(f"エラーが発生しました: {e}")
