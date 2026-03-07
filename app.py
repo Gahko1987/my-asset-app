@@ -234,7 +234,7 @@ if st.session_state.get("sim_executed", False):
                     base_flow_map[age] = int(p["amount"])
                 t_start = int(p["end"]) + 1
 
-            # 2. 教育費の控除 (明細用はマイナス値、表示用はプラス値)
+            # 2. 教育費の控除 (明細用はマイナス値)
             education_cost_map = {}
             for child in st.session_state.children_list:
                 for y in range(40): 
@@ -255,12 +255,10 @@ if st.session_state.get("sim_executed", False):
                 if housing_info["type"] == "already":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
-                        # 現在の返済額からの差額(金利上昇によるマイナス)を記録
                         housing_map[age] = housing_info["base_pmt"] - actual_pmt
                 elif housing_info["type"] == "future":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
-                        # 家賃浮き分(プラス)とローン返済分(マイナス)の合算を記録
                         housing_map[age] = housing_info["current_rent_saved"] - actual_pmt
 
             # 4. イベント (明細用)
@@ -268,18 +266,18 @@ if st.session_state.get("sim_executed", False):
             for e in st.session_state.events_list:
                 event_map[int(e["age"])] = event_map.get(int(e["age"]), 0) + int(e["amount"])
 
-            # キャッシュフローの合算
-            cashflow_map = {}
-            for y in range(years + 1):
-                age = current_age + y
-                cashflow_map[age] = base_flow_map.get(age, 0) + pension_map.get(age, 0) + housing_map.get(age, 0) + edu_flow_map.get(age, 0)
+            # キャッシュフローの合算と配列化
+            b_arr = [base_flow_map.get(current_age + y, 0) for y in range(years + 1)]
+            p_arr = [pension_map.get(current_age + y, 0) for y in range(years + 1)]
+            h_arr = [housing_map.get(current_age + y, 0) for y in range(years + 1)]
+            e_arr = [edu_flow_map.get(current_age + y, 0) for y in range(years + 1)]
+            ev_arr = [event_map.get(current_age + y, 0) for y in range(years + 1)]
+            net_arr = [b_arr[y] + p_arr[y] + h_arr[y] + e_arr[y] + ev_arr[y] for y in range(years + 1)]
 
             # 計算準備
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
-            flows = np.array([cashflow_map.get(current_age + y, 0) for y in range(years)])
-            spots = np.array([event_map.get(current_age + y, 0) for y in range(years)])
-            total_flows = flows + spots
+            total_flows = np.array(net_arr)
             random_returns = np.random.normal(real_mean_return, risk_std, (num_simulations, years))
             simulation_results = np.zeros((num_simulations, years + 1))
             simulation_results[:, 0] = current_assets
@@ -288,8 +286,6 @@ if st.session_state.get("sim_executed", False):
             for year in range(years):
                 prev_d = deterministic_assets[-1]
                 deterministic_assets.append(max(0, (prev_d + total_flows[year]) * (1 + real_mean_return)) if prev_d > 0 else 0)
-                
-                # 積立元本の計算（0未満にならないように制御）
                 principal_assets.append(max(0, principal_assets[-1] + total_flows[year]))
 
                 prev_assets = simulation_results[:, year]
@@ -329,7 +325,7 @@ if st.session_state.get("sim_executed", False):
                 if cost > 0: ax.axvspan(age, age+1, color='cyan', alpha=0.1)
             for y in range(years):
                 age = current_age + y
-                if cashflow_map.get(age, 0) < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
+                if net_arr[y] < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
                 if housing_info["type"] != "none" and housing_info["start_age"] <= age <= housing_info["end_age"]:
                     ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
             ax.plot(age_axis, principal_assets, color='gray', linewidth=2, label='積立元本')
@@ -343,137 +339,21 @@ if st.session_state.get("sim_executed", False):
             st.pyplot(fig)
             st.caption("🟦 水色: 教育費 / 🟧 オレンジ: 収支赤字 / 🟩 緑: 教育費＋赤字 / 🟪 紫: ローン返済期間")
 
-            # ==========================================
-            # ★ AI相談機能
-            # ==========================================
-            st.divider()
-            st.subheader("🤖 AI（ChatGPT）にシミュレーション結果を相談する")
-            
-            # CSV作成
-            csv_data = pd.DataFrame({
-                "年齢": age_axis,
-                "積立元本(万円)": principal_assets,
-                "単純計算(万円)": [int(x) for x in deterministic_assets],
-                "好調_上位20%(万円)": [int(x) for x in top_20_res],
-                "中央値(万円)": [int(x) for x in median_res],
-                "不調_下位20%(万円)": [int(x) for x in bottom_20_res]
-            })
-            csv_file = csv_data.to_csv(index=False).encode('utf-8-sig')
-
-            # プロンプト生成
-            prompt_text = f"""あなたは経験豊富で優秀なファイナンシャルプランナー（FP）です。
-クライアントから提供された以下の【家計シミュレーション結果】と【詳細な前提条件】を分析し、
-将来の家計破綻リスクを回避し、より豊かなライフプランを実現するためのプロフェッショナルなアドバイスを提供してください。
-※私が添付したCSVファイル（各年齢のモンテカルロシミュレーション資産推移データ）も併せて詳細な分析に活用してください。
-
----
-### 📊 クライアントの基本情報とシミュレーション結果
-
-【1. 基本プロファイル・投資設定】
-・現在の年齢: {current_age}歳
-・現在の資産額: {current_assets}万円
-・想定運用利回り: {mean_return_pct}% / リスク(標準偏差): {risk_std_pct}% / インフレ率: {inflation_rate_pct}%
-
-【2. ライフステージ別の基本収支（年金・ローン・教育費を除く手取り収入−基本生活費）】\n"""
-            for p in st.session_state.phases_list: prompt_text += f"・〜{p['end']}歳: 年間 {p['amount']}万円\n"
-            
-            prompt_text += "\n【3. 特別なライフイベント（一時的な収入・支出）】\n"
-            if not st.session_state.events_list: prompt_text += "・特になし\n"
-            for e in st.session_state.events_list: prompt_text += f"・{e['age']}歳: {e['amount']}万円 ({e['name']})\n"
-
-            prompt_text += "\n【4. 家族構成・教育費プラン】\n"
-            if st.session_state.children_list:
-                for i, c in enumerate(st.session_state.children_list):
-                    prompt_text += f"・子供{i+1}: 現在{c['age']}歳, コース: {COURSE_NAMES.get(c['course'], c['course'])}\n"
-            else:
-                prompt_text += "・子供なし\n"
-
-            prompt_text += "\n【5. 住宅・ローン状況】\n"
-            if housing_option == "これから購入予定":
-                prompt_text += f"・購入年齢: {h_age}歳 / 物件価格: {h_price}万円 (頭金: {h_down}万円) / 返済期間: {h_years}年\n"
-                prompt_text += f"・金利: 初期{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
-                prompt_text += f"・※保守的見積もりのため、ローン完済後の住居費軽減効果（浮いた家賃分）はシミュレーション上のプラスに含めていません。\n"
-            elif housing_option == "すでに購入済み (ローン返済中)":
-                prompt_text += f"・ローン残高: {loan_principal}万円 / 残り返済期間: {h_years_remain}年\n"
-                prompt_text += f"・金利: 現在{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
-                prompt_text += f"・※保守的見積もりのため、ローン完済後の収支改善効果はシミュレーション上のプラスに含めていません。\n"
-            else:
-                prompt_text += "・賃貸またはローンなし\n"
-
-            prompt_text += "\n【6. 老後・年金見込み】\n"
-            if use_pension: prompt_text += f"・受給開始年齢: {pension_start_age}歳 / 年額見込み: {pension_annual}万円\n"
-            else: prompt_text += "・年金考慮なし\n"
-
-            prompt_text += f"""
-【7. モンテカルロシミュレーション結果 ({end_age}歳時点・1万回試行)】
-・資産生存率（破綻しない確率）: {100 - ruin_prob:.1f}%
-・中央値（標準的なケースの最終資産）: {int(median_res[-1]):,}万円
-・下位20%（不調時のワーストケース）: {int(bottom_20_res[-1]):,}万円
-"""
-            if total_edu > 0: prompt_text += f"・教育費総額見込み: 約{total_edu:,}万円\n"
-            if housing_info["type"] != "none": prompt_text += f"・住宅ローン総支払見込み: 約{int(total_loan):,}万円\n"
-
-            prompt_text += """
----
-### 📝 FPとしてのコンサルティング依頼事項
-上記のデータに基づき、以下の点について具体的かつ実践的なアドバイスを提示してください。
-
-1. **現状の評価と潜在的なリスクの洗い出し**:
-   - 資産生存率やワーストケースの数字から見て、この計画の安全性はどう評価できますか？
-   - 教育費のピーク時や老後資金の取り崩し期など、資金ショートの危険性が高い「要注意期間」はいつですか？
-
-2. **住宅ローンに関するアドバイス** (※該当する場合のみ):
-   - 金利上昇リスク（変動金利の場合）に対する具体的な備え方はありますか？
-   - 繰り上げ返済をすべきか、投資に回すべきかの判断基準を教えてください。
-
-3. **資産運用とインフレ対策**:
-   - 現在の利回り・リスク設定は、目標達成やインフレ率に対して適切ですか？
-   - 現金比率と投資比率のバランスはどうコントロールすべきでしょうか。
-
-4. **具体的なアクションプラン（改善策）の提案**:
-   - 今すぐ実行できる家計の見直しや、将来の資産をより確実にするための具体的な行動を3〜5つ提案してください。
-   - 耳の痛い指摘（支出の削減が必要、目標が高すぎる等）もプロの視点で遠慮なくお伝えください。
-"""
-            chatgpt_url = "https://chatgpt.com/"
-            
-            st.markdown("##### 📝 相談の手順")
-            st.info("✅ **ステップ1:** 以下の枠内にあるテキストの右上に出る「コピーボタン」を押して、文章をコピーしてください。")
-            st.code(prompt_text, language="markdown")
-
-            st.info("✅ **ステップ2:** 以下のボタンから、AIに読ませるための「シミュレーション結果(CSVデータ)」をダウンロードしてください。")
-            st.download_button("📥 CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
-            
-            st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
-            st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
-
-            # ==========================================
-            # ★ 追加: CF明細と積立元本推移のテーブル
-            # ==========================================
+            # --- CF明細と積立元本推移のテーブル ---
             st.divider()
             st.subheader("🧾 キャッシュフロー明細と積立元本の推移 (1歳ごと)")
             cf_rows = []
             for y in range(years):
-                age = current_age + y
-                b = base_flow_map.get(age, 0)
-                p = pension_map.get(age, 0)
-                h = housing_map.get(age, 0)
-                e = edu_flow_map.get(age, 0)
-                ev = event_map.get(age, 0)
-                
-                net = b + p + h + e + ev
-                start_bal = principal_assets[y]
-                end_bal = principal_assets[y+1]
-                
                 cf_rows.append({
-                    "年齢": f"{age}歳",
-                    "年初積立元本": f"{int(start_bal):,} 万円",
-                    "基本収支": f"{int(b):,} 万円",
-                    "年金": f"{int(p):,} 万円",
-                    "住宅・家賃相殺(現在比)": f"{int(h):,} 万円",
-                    "教育費": f"{int(e):,} 万円",
-                    "イベント等": f"{int(ev):,} 万円",
-                    "年間純収支": f"{int(net):,} 万円",
-                    "年末積立元本": f"{int(end_bal):,} 万円"
+                    "年齢": f"{current_age + y}歳",
+                    "年初積立元本": f"{int(principal_assets[y]):,} 万円",
+                    "基本収支": f"{int(b_arr[y]):,} 万円",
+                    "年金": f"{int(p_arr[y]):,} 万円",
+                    "住宅・家賃相殺(変動分)": f"{int(h_arr[y]):,} 万円",
+                    "教育費": f"{int(e_arr[y]):,} 万円",
+                    "イベント等": f"{int(ev_arr[y]):,} 万円",
+                    "年間純収支": f"{int(net_arr[y]):,} 万円",
+                    "年末積立元本": f"{int(principal_assets[y+1]):,} 万円"
                 })
             
             df_cf = pd.DataFrame(cf_rows).set_index("年齢")
@@ -563,6 +443,115 @@ if st.session_state.get("sim_executed", False):
                             loan_rows.append({"年齢": f"{p_age}歳", "状態": "購入前", "適用金利": "-", "年間返済額": "-", "増加分(収支マイナス)": "-", "年末残高": "-"})
                 if loan_rows:
                     st.dataframe(pd.DataFrame(loan_rows).set_index("年齢"), use_container_width=True)
+
+            # ==========================================
+            # ★ AI相談機能 (一番下へ配置＆CSV内容拡充)
+            # ==========================================
+            st.divider()
+            st.subheader("🤖 AI（ChatGPT）にシミュレーション結果を相談する")
+            
+            # CSV作成（明細データも追加！）
+            csv_data = pd.DataFrame({
+                "年齢": age_axis,
+                "基本収支(万円)": b_arr,
+                "年金(万円)": p_arr,
+                "住宅ローン変動分(万円)": h_arr,
+                "教育費(万円)": e_arr,
+                "イベント等(万円)": ev_arr,
+                "年間純収支(万円)": net_arr,
+                "積立元本(万円)": principal_assets,
+                "単純計算(万円)": [int(x) for x in deterministic_assets],
+                "好調_上位20%(万円)": [int(x) for x in top_20_res],
+                "中央値(万円)": [int(x) for x in median_res],
+                "不調_下位20%(万円)": [int(x) for x in bottom_20_res]
+            })
+            csv_file = csv_data.to_csv(index=False).encode('utf-8-sig')
+
+            # プロンプト生成
+            prompt_text = f"""あなたは経験豊富で優秀なファイナンシャルプランナー（FP）です。
+クライアントから提供された以下の【家計シミュレーション結果】と【詳細な前提条件】を分析し、
+将来の家計破綻リスクを回避し、より豊かなライフプランを実現するためのプロフェッショナルなアドバイスを提供してください。
+※私が添付したCSVファイルには、各年齢の「キャッシュフロー明細（基本収支、年金、住宅、教育費などの内訳）」と「モンテカルロシミュレーションの資産推移データ」が含まれています。併せて詳細な分析に活用してください。
+
+---
+### 📊 クライアントの基本情報とシミュレーション結果
+
+【1. 基本プロファイル・投資設定】
+・現在の年齢: {current_age}歳
+・現在の資産額: {current_assets}万円
+・想定運用利回り: {mean_return_pct}% / リスク(標準偏差): {risk_std_pct}% / インフレ率: {inflation_rate_pct}%
+
+【2. ライフステージ別の基本収支（年金・ローン・教育費を除く手取り収入−基本生活費）】\n"""
+            for p in st.session_state.phases_list: prompt_text += f"・〜{p['end']}歳: 年間 {p['amount']}万円\n"
+            
+            prompt_text += "\n【3. 特別なライフイベント（一時的な収入・支出）】\n"
+            if not st.session_state.events_list: prompt_text += "・特になし\n"
+            for e in st.session_state.events_list: prompt_text += f"・{e['age']}歳: {e['amount']}万円 ({e['name']})\n"
+
+            prompt_text += "\n【4. 家族構成・教育費プラン】\n"
+            if st.session_state.children_list:
+                for i, c in enumerate(st.session_state.children_list):
+                    prompt_text += f"・子供{i+1}: 現在{c['age']}歳, コース: {COURSE_NAMES.get(c['course'], c['course'])}\n"
+            else:
+                prompt_text += "・子供なし\n"
+
+            prompt_text += "\n【5. 住宅・ローン状況】\n"
+            if housing_option == "これから購入予定":
+                prompt_text += f"・購入年齢: {h_age}歳 / 物件価格: {h_price}万円 (頭金: {h_down}万円) / 返済期間: {h_years}年\n"
+                prompt_text += f"・金利: 初期{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
+                prompt_text += f"・※保守的見積もりのため、ローン完済後の住居費軽減効果（浮いた家賃分）はシミュレーション上のプラスに含めていません。\n"
+            elif housing_option == "すでに購入済み (ローン返済中)":
+                prompt_text += f"・ローン残高: {loan_principal}万円 / 残り返済期間: {h_years_remain}年\n"
+                prompt_text += f"・金利: 現在{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
+                prompt_text += f"・※保守的見積もりのため、ローン完済後の収支改善効果はシミュレーション上のプラスに含めていません。\n"
+            else:
+                prompt_text += "・賃貸またはローンなし\n"
+
+            prompt_text += "\n【6. 老後・年金見込み】\n"
+            if use_pension: prompt_text += f"・受給開始年齢: {pension_start_age}歳 / 年額見込み: {pension_annual}万円\n"
+            else: prompt_text += "・年金考慮なし\n"
+
+            prompt_text += f"""
+【7. モンテカルロシミュレーション結果 ({end_age}歳時点・1万回試行)】
+・資産生存率（破綻しない確率）: {100 - ruin_prob:.1f}%
+・中央値（標準的なケースの最終資産）: {int(median_res[-1]):,}万円
+・下位20%（不調時のワーストケース）: {int(bottom_20_res[-1]):,}万円
+"""
+            if total_edu > 0: prompt_text += f"・教育費総額見込み: 約{total_edu:,}万円\n"
+            if housing_info["type"] != "none": prompt_text += f"・住宅ローン総支払見込み: 約{int(total_loan):,}万円\n"
+
+            prompt_text += """
+---
+### 📝 FPとしてのコンサルティング依頼事項
+上記のデータに基づき、以下の点について具体的かつ実践的なアドバイスを提示してください。
+
+1. **現状の評価と潜在的なリスクの洗い出し**:
+   - 資産生存率やワーストケースの数字から見て、この計画の安全性はどう評価できますか？
+   - 添付のCSVデータ（キャッシュフロー明細）から読み取れる、資金ショートの危険性が高い「要注意期間」はいつですか？
+
+2. **住宅ローンに関するアドバイス** (※該当する場合のみ):
+   - 金利上昇リスク（変動金利の場合）に対する具体的な備え方はありますか？
+   - 繰り上げ返済をすべきか、投資に回すべきかの判断基準を教えてください。
+
+3. **資産運用とインフレ対策**:
+   - 現在の利回り・リスク設定は、目標達成やインフレ率に対して適切ですか？
+   - 現金比率と投資比率のバランスはどうコントロールすべきでしょうか。
+
+4. **具体的なアクションプラン（改善策）の提案**:
+   - 今すぐ実行できる家計の見直しや、将来の資産をより確実にするための具体的な行動を3〜5つ提案してください。
+   - 耳の痛い指摘（支出の削減が必要、目標が高すぎる等）もプロの視点で遠慮なくお伝えください。
+"""
+            chatgpt_url = "https://chatgpt.com/"
+            
+            st.markdown("##### 📝 相談の手順")
+            st.info("✅ **ステップ1:** 以下の枠内にあるテキストの右上に出る「コピーボタン」を押して、文章をコピーしてください。")
+            st.code(prompt_text, language="markdown")
+
+            st.info("✅ **ステップ2:** 以下のボタンから、AIに読ませるための「詳細明細データ(CSV)」をダウンロードしてください。")
+            st.download_button("📥 CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
+            
+            st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
+            st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
 
         else:
             st.error("終了年齢は現在の年齢より大きくしてください。")
