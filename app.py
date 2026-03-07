@@ -209,12 +209,9 @@ with col2:
 # シミュレーション実行
 # ==========================================
 st.divider()
-
-# ★ここが重要：ボタンが押されたら「実行済み」というフラグを立てる
 if st.button("シミュレーションを実行する (10,000回)", type="primary"):
     st.session_state.sim_executed = True
 
-# ★ここが重要：フラグが立っていれば、常に計算と表示を行う（ダウンロードボタンでのリセットを防ぐ）
 if st.session_state.get("sim_executed", False):
     st.success("✅ 以降は年齢や金額などの設定を変更するたびに、リアルタイムで結果が自動更新されます！")
     try:
@@ -277,6 +274,7 @@ if st.session_state.get("sim_executed", False):
             simulation_results = np.zeros((num_simulations, years + 1))
             simulation_results[:, 0] = current_assets
             
+            progress_bar = st.progress(0)
             for year in range(years):
                 prev_d = deterministic_assets[-1]
                 deterministic_assets.append(max(0, (prev_d + total_flows[year]) * (1 + real_mean_return)) if prev_d > 0 else 0)
@@ -288,6 +286,8 @@ if st.session_state.get("sim_executed", False):
                 new_assets[active_mask] = (prev_assets[active_mask] + total_flows[year]) * (1 + random_returns[active_mask, year])
                 new_assets[new_assets < 0] = 0
                 simulation_results[:, year + 1] = new_assets
+                if year % 5 == 0: progress_bar.progress((year + 1) / years)
+            progress_bar.progress(1.0)
 
             # 結果集計
             median_res = np.percentile(simulation_results, 50, axis=0)
@@ -427,25 +427,44 @@ if st.session_state.get("sim_executed", False):
             st.code(prompt_text, language="markdown")
 
             st.info("✅ **ステップ2:** 以下のボタンから、AIに読ませるための「シミュレーション結果(CSVデータ)」をダウンロードしてください。")
-            # ダウンロードボタンを押しても画面が消えなくなりました！
             st.download_button("📥 CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
             
             st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
             st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
 
-            # --- 詳細データ表 ---
+            # ==========================================
+            # ★ 変更箇所: グループごとの平均ではなく「ピンポイントのパーセンタイル値」を抽出する
+            # ==========================================
             st.divider()
             st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
-            d_data = {"ランク": ["上位 10%", "11% - 20%", "21% - 30%", "31% - 40%", "41% - 50% (中央)", "51% - 60%", "61% - 70%", "71% - 80%", "81% - 90%", "91% - 100% (下位)"]}
+            
+            # パーセンタイル値の定義（グラフの線とピッタリ合わせる）
+            percentiles_to_calc = [
+                ("上位 10%ライン", 90),
+                ("上位 20%ライン", 80),
+                ("上位 30%ライン", 70),
+                ("上位 40%ライン", 60),
+                ("中央値 (ピッタリ50%)", 50),
+                ("下位 40%ライン", 40),
+                ("下位 30%ライン", 30),
+                ("下位 20%ライン", 20),
+                ("下位 10%ライン", 10),
+                ("最下位 (ワースト)", 0)
+            ]
+            
+            d_data = {"ランク": [p[0] for p in percentiles_to_calc]}
             r_data = {"指標": ["単純計算", "積立元本"]}
-            ranges = [(90, 100), (80, 90), (70, 80), (60, 70), (50, 60), (40, 50), (30, 40), (20, 30), (10, 20), (0, 10)]
+
             for y in range(years + 1):
                 age = current_age + y
-                vals = np.sort(simulation_results[:, y])
+                vals = simulation_results[:, y]
                 col_vals = []
-                for s, e in ranges:
-                    subset = vals[int(num_simulations * s / 100):int(num_simulations * e / 100)]
-                    col_vals.append(f"{int(np.mean(subset)):,} 万円" if len(subset) > 0 else "0 万円")
+                
+                # 指定したパーセンタイルの値をズバリ計算して追加
+                for label, p_val in percentiles_to_calc:
+                    val_at_p = np.percentile(vals, p_val)
+                    col_vals.append(f"{int(val_at_p):,} 万円")
+                
                 d_data[f"{age}歳"] = col_vals
                 r_data[f"{age}歳"] = [f"{int(deterministic_assets[y]):,} 万円", f"{int(principal_assets[y]):,} 万円"]
 
