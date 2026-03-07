@@ -4,7 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import japanize_matplotlib
 import matplotlib.ticker as ticker
-import urllib.parse
 
 # ページ設定
 st.set_page_config(page_title="資産ライフプランシミュレーター", layout="wide")
@@ -328,7 +327,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             st.caption("🟦 水色: 教育費 / 🟧 オレンジ: 収支赤字 / 🟩 緑: 教育費＋赤字 / 🟪 紫: ローン返済期間")
 
             # ==========================================
-            # ★ AI相談機能（プロンプト生成 ＆ CSVエクスポート）
+            # ★ AI相談機能（エラー回避のためURLパラメータからクリップボード手動コピーへ変更）
             # ==========================================
             st.divider()
             st.subheader("🤖 AI（ChatGPT）にシミュレーション結果を相談する")
@@ -344,11 +343,11 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             })
             csv_file = csv_data.to_csv(index=False).encode('utf-8-sig')
 
-            # プロンプト生成 (FPのプロフェッショナルな視点)
+            # プロンプト生成
             prompt_text = f"""あなたは経験豊富で優秀なファイナンシャルプランナー（FP）です。
 クライアントから提供された以下の【家計シミュレーション結果】と【詳細な前提条件】を分析し、
 将来の家計破綻リスクを回避し、より豊かなライフプランを実現するためのプロフェッショナルなアドバイスを提供してください。
-添付されているCSVファイル（各年齢のモンテカルロシミュレーション資産推移データ）も詳細な分析に活用してください。
+※私が添付したCSVファイル（各年齢のモンテカルロシミュレーション資産推移データ）も併せて詳細な分析に活用してください。
 
 ---
 ### 📊 クライアントの基本情報とシミュレーション結果
@@ -416,17 +415,18 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
    - 今すぐ実行できる家計の見直しや、将来の資産をより確実にするための具体的な行動を3〜5つ提案してください。
    - 耳の痛い指摘（支出の削減が必要、目標が高すぎる等）もプロの視点で遠慮なくお伝えください。
 """
-            encoded_prompt = urllib.parse.quote(prompt_text)
-            chatgpt_url = f"https://chatgpt.com/?q={encoded_prompt}"
+            # エラー回避のため、URLにはプロンプトを含めずに単純なリンクにする
+            chatgpt_url = "https://chatgpt.com/"
             
-            st.info("✅ **ステップ1:** 以下のボタンからCSVデータをダウンロードしてください。")
-            st.download_button("📥 1. シミュレーション結果(CSV)をダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
+            st.markdown("##### 📝 相談の手順")
+            st.info("✅ **ステップ1:** 以下の枠内にあるテキストの右上に出る「コピーボタン」を押して、文章をコピーしてください。")
+            st.code(prompt_text, language="markdown")
+
+            st.info("✅ **ステップ2:** 以下のボタンから、AIに読ませるための「シミュレーション結果(CSVデータ)」をダウンロードしてください。")
+            st.download_button("📥 CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
             
-            st.info("✅ **ステップ2:** 以下のボタンでChatGPTを開き、先ほどダウンロードしたCSVをクリップ📎マーク（またはドラッグ＆ドロップ）で添付して送信してください。")
-            st.link_button("💬 2. ChatGPTを開いて相談する（プロンプト自動入力）", chatgpt_url, type="primary")
-            
-            with st.expander("送信されるプロンプト内容（手動でコピーする場合）"):
-                st.text_area("", value=prompt_text, height=300)
+            st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
+            st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
 
             # --- 詳細データ表 ---
             st.divider()
