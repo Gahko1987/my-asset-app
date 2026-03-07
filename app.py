@@ -340,42 +340,49 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             # --- シミュレーション計算 ---
             deterministic_assets = [current_assets]
             principal_assets = [current_assets]
+            
+            # 🚀 NumPyを使った高速ベクトル演算
+            flows = np.array([cashflow_map.get(current_age + y, 0) for y in range(years)])
+            spots = np.array([event_map.get(current_age + y, 0) for y in range(years)])
+            total_flows = flows + spots
+            
+            # 1万回×年数分 の乱数を一括生成
+            random_returns = np.random.normal(real_mean_return, risk_std, (num_simulations, years))
+            
+            # 結果を格納する配列
             simulation_results = np.zeros((num_simulations, years + 1))
+            simulation_results[:, 0] = current_assets
+            
+            progress_bar = st.progress(0)
             
             for year in range(years):
-                age = current_age + year
-                flow = cashflow_map.get(age, 0)
-                spot = event_map.get(age, 0)
-                
+                # 単純計算用
                 prev_d = deterministic_assets[-1]
                 if prev_d <= 0: new_d = 0
                 else:
-                    new_d = (prev_d + flow + spot) * (1 + real_mean_return)
+                    new_d = (prev_d + total_flows[year]) * (1 + real_mean_return)
                     if new_d < 0: new_d = 0
                 deterministic_assets.append(new_d)
                 
+                # 元本計算用
                 prev_p = principal_assets[-1]
-                new_p = prev_p + flow + spot
+                new_p = prev_p + total_flows[year]
                 if new_p < 0: new_p = 0
                 principal_assets.append(new_p)
 
-            # C: モンテカルロ
-            progress_bar = st.progress(0)
-            for i in range(num_simulations):
-                assets = [current_assets]
-                if i % 100 == 0: progress_bar.progress(i / num_simulations)
-                for year in range(years):
-                    age = current_age + year
-                    flow = cashflow_map.get(age, 0)
-                    spot = event_map.get(age, 0)
-                    r = np.random.normal(real_mean_return, risk_std)
-                    prev = assets[-1]
-                    if prev <= 0: new_val = 0
-                    else:
-                        new_val = (prev + flow + spot) * (1 + r)
-                        if new_val < 0: new_val = 0
-                    assets.append(new_val)
-                simulation_results[i, :] = assets
+                # モンテカルロ計算用（一括処理）
+                prev_assets = simulation_results[:, year]
+                active_mask = prev_assets > 0
+                
+                new_assets = np.zeros_like(prev_assets)
+                new_assets[active_mask] = (prev_assets[active_mask] + total_flows[year]) * (1 + random_returns[active_mask, year])
+                new_assets[new_assets < 0] = 0
+                
+                simulation_results[:, year + 1] = new_assets
+                
+                if year % 5 == 0:
+                    progress_bar.progress((year + 1) / years)
+                    
             progress_bar.progress(1.0)
 
             # --- 結果集計 ---
@@ -517,6 +524,44 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 st.dataframe(pd.DataFrame(edu_rows), hide_index=True, use_container_width=True)
             else:
                 st.info("教育費がかかる期間はありません。")
+                
+            # --- 表3: 住宅ローン内訳 ---
+            if housing_info["type"] != "none":
+                st.divider()
+                st.subheader("🏠 住宅ローン返済の内訳詳細 (1年ごと)")
+                loan_rows = []
+                grand_total_loan = 0
+
+                for y in range(years + 1):
+                    p_age = current_age + y
+                    
+                    # 完済後3年くらいまで表示する（結果がスッキリするため）
+                    if p_age <= housing_info["end_age"] + 3:
+                        pmt = 0
+                        status = "-"
+                        
+                        if housing_info["start_age"] <= p_age <= housing_info["end_age"]:
+                            pmt = int(housing_info["annual_pmt"])
+                            grand_total_loan += pmt
+                            status = "返済中"
+                        elif p_age > housing_info["end_age"]:
+                            status = "完済 🎉"
+                        elif p_age < housing_info["start_age"]:
+                            status = "購入前"
+
+                        loan_rows.append({
+                            "年齢": f"{p_age}歳",
+                            "年間返済額": f"{pmt:,} 万円" if pmt > 0 else "-",
+                            "状態": status
+                        })
+                
+                if loan_rows:
+                    loan_rows.append({
+                        "年齢": "合計",
+                        "年間返済額": f"{grand_total_loan:,} 万円",
+                        "状態": ""
+                    })
+                    st.dataframe(pd.DataFrame(loan_rows), hide_index=True, use_container_width=True)
 
     except Exception as e:
         st.error(f"エラー: {e}")
