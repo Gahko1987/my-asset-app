@@ -97,7 +97,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     housing_info = {"type": "none", "base_pmt": 0, "schedule": {}, "start_age": 0, "end_age": 0, "current_rent_saved": 0}
 
     if housing_option == "これから購入予定":
-        st.caption("※ 購入後は「現在の家賃」がかからなくなり、代わりに「ローン返済」が始まります。")
+        st.caption("※ 購入後は現在の家賃がなくなりローン返済が始まります。（保守的設定のため、完済後の収支改善は考慮しません）")
         h_col1, h_col2, h_col3 = st.columns(3)
         with h_col1:
             h_age = st.number_input("購入年齢", current_age, 100, current_age + 5)
@@ -119,7 +119,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             st.info(f"📅 **計画**: {h_age}歳で購入。初年度の返済は約{int(base_pmt)}万円。金利上昇分は収支からマイナスされます。")
 
     elif housing_option == "すでに購入済み (ローン返済中)":
-        st.caption("※ 金利上昇で返済額が増えた分は、現在の収支からマイナスされます。")
+        st.caption("※ 金利上昇で返済額が増えた分は、現在の収支からマイナスされます。（保守的設定のため、完済後の収支改善は考慮しません）")
         h_col1, h_col2, h_col3 = st.columns(3)
         with h_col1:
             loan_principal = st.number_input("現在のローン残高 (万円)", 0, 50000, 3000)
@@ -134,7 +134,7 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
             schedule_list, base_pmt = calculate_loan_schedule(loan_principal, h_years_remain, h_rate, h_rate_inc, h_rate_max)
             schedule_dict = {current_age + item["year"]: item for item in schedule_list}
             housing_info = {"type": "already", "base_pmt": base_pmt, "schedule": schedule_dict, "start_age": current_age, "end_age": current_age + h_years_remain - 1, "current_rent_saved": 0}
-            st.info(f"📅 **計画**: 現在の年間返済額は約{int(base_pmt)}万円。完済後はこの額が収支にプラスされます。")
+            st.info(f"📅 **計画**: 現在の年間返済額は約{int(base_pmt)}万円基準。保守的設定のため、完済後のプラス影響は見込みません。")
 
     # --- 年金設定 ---
     st.markdown("---")
@@ -246,18 +246,20 @@ if st.session_state.get("sim_executed", False):
                 if use_pension and age >= pension_start_age:
                     cashflow_map[age] = cashflow_map.get(age, 0) + pension_annual
                 
+                # ★修正箇所: 完済後の保守的設定（プラス加味を行わない）
                 if housing_info["type"] == "already":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
+                        # ベース(今の返済額)と実際の返済額の差額だけマイナスする
                         cashflow_map[age] = cashflow_map.get(age, 0) + (housing_info["base_pmt"] - actual_pmt)
-                    elif age > housing_info["end_age"]:
-                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["base_pmt"]
+                    # 完済後（age > housing_info["end_age"]）は何もしない（保守的）
+
                 elif housing_info["type"] == "future":
                     if housing_info["start_age"] <= age <= housing_info["end_age"]:
                         actual_pmt = housing_info["schedule"][age]["annual_pmt"]
+                        # 家賃が浮く分プラスし、実際の返済額を全額マイナスする
                         cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"] - actual_pmt
-                    elif age > housing_info["end_age"]:
-                        cashflow_map[age] = cashflow_map.get(age, 0) + housing_info["current_rent_saved"]
+                    # 完済後（age > housing_info["end_age"]）は何もしない（保守的）
 
             # 4. イベント
             event_map = {}
@@ -380,9 +382,11 @@ if st.session_state.get("sim_executed", False):
             if housing_option == "これから購入予定":
                 prompt_text += f"・購入年齢: {h_age}歳 / 物件価格: {h_price}万円 (頭金: {h_down}万円) / 返済期間: {h_years}年\n"
                 prompt_text += f"・金利: 初期{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
+                prompt_text += f"・※保守的見積もりのため、ローン完済後の住居費軽減効果（浮いた家賃分）はシミュレーション上のプラスに含めていません。\n"
             elif housing_option == "すでに購入済み (ローン返済中)":
                 prompt_text += f"・ローン残高: {loan_principal}万円 / 残り返済期間: {h_years_remain}年\n"
                 prompt_text += f"・金利: 現在{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
+                prompt_text += f"・※保守的見積もりのため、ローン完済後の収支改善効果はシミュレーション上のプラスに含めていません。\n"
             else:
                 prompt_text += "・賃貸またはローンなし\n"
 
@@ -432,13 +436,10 @@ if st.session_state.get("sim_executed", False):
             st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
             st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
 
-            # ==========================================
-            # ★ 変更箇所: グループごとの平均ではなく「ピンポイントのパーセンタイル値」を抽出する
-            # ==========================================
+            # --- 詳細データ表 ---
             st.divider()
             st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
             
-            # パーセンタイル値の定義（グラフの線とピッタリ合わせる）
             percentiles_to_calc = [
                 ("上位 10%ライン", 90),
                 ("上位 20%ライン", 80),
@@ -459,8 +460,6 @@ if st.session_state.get("sim_executed", False):
                 age = current_age + y
                 vals = simulation_results[:, y]
                 col_vals = []
-                
-                # 指定したパーセンタイルの値をズバリ計算して追加
                 for label, p_val in percentiles_to_calc:
                     val_at_p = np.percentile(vals, p_val)
                     col_vals.append(f"{int(val_at_p):,} 万円")
