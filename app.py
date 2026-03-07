@@ -344,31 +344,35 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             })
             csv_file = csv_data.to_csv(index=False).encode('utf-8-sig')
 
-            # プロンプトの動的生成
-            prompt_text = f"""あなたは優秀なファイナンシャルプランナー（FP）です。
-以下の家計シミュレーション結果と詳細な前提条件をもとに、具体的な改善アドバイスやリスク対策を提示してください。
-※私が添付したCSVファイル（各年齢のモンテカルロシミュレーション資産推移データ）も併せて分析してください。
+            # プロンプト生成 (FPのプロフェッショナルな視点)
+            prompt_text = f"""あなたは経験豊富で優秀なファイナンシャルプランナー（FP）です。
+クライアントから提供された以下の【家計シミュレーション結果】と【詳細な前提条件】を分析し、
+将来の家計破綻リスクを回避し、より豊かなライフプランを実現するためのプロフェッショナルなアドバイスを提供してください。
+添付されているCSVファイル（各年齢のモンテカルロシミュレーション資産推移データ）も詳細な分析に活用してください。
 
-【1. 基本情報】
+---
+### 📊 クライアントの基本情報とシミュレーション結果
+
+【1. 基本プロファイル・投資設定】
 ・現在の年齢: {current_age}歳
-・現在の資産: {current_assets}万円
-・想定利回り: {mean_return_pct}% / リスク(標準偏差): {risk_std_pct}% / インフレ率: {inflation_rate_pct}%
+・現在の資産額: {current_assets}万円
+・想定運用利回り: {mean_return_pct}% / リスク(標準偏差): {risk_std_pct}% / インフレ率: {inflation_rate_pct}%
 
-【2. ライフステージ収支（年金・ローン・教育費を除く基本収支）】\n"""
+【2. ライフステージ別の基本収支（年金・ローン・教育費を除く手取り収入−基本生活費）】\n"""
             for p in st.session_state.phases_list: prompt_text += f"・〜{p['end']}歳: 年間 {p['amount']}万円\n"
             
-            prompt_text += "\n【3. ライフイベント】\n"
+            prompt_text += "\n【3. 特別なライフイベント（一時的な収入・支出）】\n"
             if not st.session_state.events_list: prompt_text += "・特になし\n"
             for e in st.session_state.events_list: prompt_text += f"・{e['age']}歳: {e['amount']}万円 ({e['name']})\n"
 
-            prompt_text += "\n【4. 教育費設定】\n"
+            prompt_text += "\n【4. 家族構成・教育費プラン】\n"
             if st.session_state.children_list:
                 for i, c in enumerate(st.session_state.children_list):
                     prompt_text += f"・子供{i+1}: 現在{c['age']}歳, コース: {COURSE_NAMES.get(c['course'], c['course'])}\n"
             else:
                 prompt_text += "・子供なし\n"
 
-            prompt_text += "\n【5. 住宅ローン設定】\n"
+            prompt_text += "\n【5. 住宅・ローン状況】\n"
             if housing_option == "これから購入予定":
                 prompt_text += f"・購入年齢: {h_age}歳 / 物件価格: {h_price}万円 (頭金: {h_down}万円) / 返済期間: {h_years}年\n"
                 prompt_text += f"・金利: 初期{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
@@ -378,22 +382,39 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             else:
                 prompt_text += "・賃貸またはローンなし\n"
 
-            prompt_text += "\n【6. 年金設定】\n"
-            if use_pension: prompt_text += f"・開始年齢: {pension_start_age}歳 / 年額: {pension_annual}万円\n"
-            else: prompt_text += "・なし\n"
+            prompt_text += "\n【6. 老後・年金見込み】\n"
+            if use_pension: prompt_text += f"・受給開始年齢: {pension_start_age}歳 / 年額見込み: {pension_annual}万円\n"
+            else: prompt_text += "・年金考慮なし\n"
 
             prompt_text += f"""
-【7. シミュレーション出力結果 ({end_age}歳時点)】
-・資産が底をつかない確率(生存率): {100 - ruin_prob:.1f}%
-・想定資産額(中央値): {int(median_res[-1]):,}万円
-・最悪のケース(下位20%): {int(bottom_20_res[-1]):,}万円
+【7. モンテカルロシミュレーション結果 ({end_age}歳時点・1万回試行)】
+・資産生存率（破綻しない確率）: {100 - ruin_prob:.1f}%
+・中央値（標準的なケースの最終資産）: {int(median_res[-1]):,}万円
+・下位20%（不調時のワーストケース）: {int(bottom_20_res[-1]):,}万円
 """
-            if total_edu > 0: prompt_text += f"・教育費総額: 約{total_edu:,}万円\n"
-            if housing_info["type"] != "none": prompt_text += f"・住宅ローン総支払額: 約{int(total_loan):,}万円\n"
+            if total_edu > 0: prompt_text += f"・教育費総額見込み: 約{total_edu:,}万円\n"
+            if housing_info["type"] != "none": prompt_text += f"・住宅ローン総支払見込み: 約{int(total_loan):,}万円\n"
 
             prompt_text += """
-【相談内容】
-上記の設定および結果を踏まえて、将来の家計破綻リスクを減らし、より安心できるライフプランを築くための具体的なアクションプランや見直しポイントを3〜5つ教えてください。設定内容に非現実的な部分や危険な兆候があれば厳しく指摘してください。
+---
+### 📝 FPとしてのコンサルティング依頼事項
+上記のデータに基づき、以下の点について具体的かつ実践的なアドバイスを提示してください。
+
+1. **現状の評価と潜在的なリスクの洗い出し**:
+   - 資産生存率やワーストケースの数字から見て、この計画の安全性はどう評価できますか？
+   - 教育費のピーク時や老後資金の取り崩し期など、資金ショートの危険性が高い「要注意期間」はいつですか？
+
+2. **住宅ローンに関するアドバイス** (※該当する場合のみ):
+   - 金利上昇リスク（変動金利の場合）に対する具体的な備え方はありますか？
+   - 繰り上げ返済をすべきか、投資に回すべきかの判断基準を教えてください。
+
+3. **資産運用とインフレ対策**:
+   - 現在の利回り・リスク設定は、目標達成やインフレ率に対して適切ですか？
+   - 現金比率と投資比率のバランスはどうコントロールすべきでしょうか。
+
+4. **具体的なアクションプラン（改善策）の提案**:
+   - 今すぐ実行できる家計の見直しや、将来の資産をより確実にするための具体的な行動を3〜5つ提案してください。
+   - 耳の痛い指摘（支出の削減が必要、目標が高すぎる等）もプロの視点で遠慮なくお伝えください。
 """
             encoded_prompt = urllib.parse.quote(prompt_text)
             chatgpt_url = f"https://chatgpt.com/?q={encoded_prompt}"
@@ -401,7 +422,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             st.info("✅ **ステップ1:** 以下のボタンからCSVデータをダウンロードしてください。")
             st.download_button("📥 1. シミュレーション結果(CSV)をダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
             
-            st.info("✅ **ステップ2:** 以下のボタンでChatGPTを開き、先ほどダウンロードしたCSVをクリップクリップ📎マーク（またはドラッグ＆ドロップ）で添付して送信してください。")
+            st.info("✅ **ステップ2:** 以下のボタンでChatGPTを開き、先ほどダウンロードしたCSVをクリップ📎マーク（またはドラッグ＆ドロップ）で添付して送信してください。")
             st.link_button("💬 2. ChatGPTを開いて相談する（プロンプト自動入力）", chatgpt_url, type="primary")
             
             with st.expander("送信されるプロンプト内容（手動でコピーする場合）"):
