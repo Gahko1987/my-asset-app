@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import japanize_matplotlib
 import matplotlib.ticker as ticker
+import urllib.parse
 
 # ページ設定
 st.set_page_config(page_title="資産ライフプランシミュレーター", layout="wide")
@@ -208,7 +209,14 @@ with col2:
 # シミュレーション実行
 # ==========================================
 st.divider()
+
+# ★ここが重要：ボタンが押されたら「実行済み」というフラグを立てる
 if st.button("シミュレーションを実行する (10,000回)", type="primary"):
+    st.session_state.sim_executed = True
+
+# ★ここが重要：フラグが立っていれば、常に計算と表示を行う（ダウンロードボタンでのリセットを防ぐ）
+if st.session_state.get("sim_executed", False):
+    st.success("✅ 以降は年齢や金額などの設定を変更するたびに、リアルタイムで結果が自動更新されます！")
     try:
         end_age = st.session_state.phases_list[-1]["end"] if st.session_state.phases_list else 100
         years = end_age - current_age
@@ -269,7 +277,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             simulation_results = np.zeros((num_simulations, years + 1))
             simulation_results[:, 0] = current_assets
             
-            progress_bar = st.progress(0)
             for year in range(years):
                 prev_d = deterministic_assets[-1]
                 deterministic_assets.append(max(0, (prev_d + total_flows[year]) * (1 + real_mean_return)) if prev_d > 0 else 0)
@@ -281,8 +288,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
                 new_assets[active_mask] = (prev_assets[active_mask] + total_flows[year]) * (1 + random_returns[active_mask, year])
                 new_assets[new_assets < 0] = 0
                 simulation_results[:, year + 1] = new_assets
-                if year % 5 == 0: progress_bar.progress((year + 1) / years)
-            progress_bar.progress(1.0)
 
             # 結果集計
             median_res = np.percentile(simulation_results, 50, axis=0)
@@ -327,7 +332,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             st.caption("🟦 水色: 教育費 / 🟧 オレンジ: 収支赤字 / 🟩 緑: 教育費＋赤字 / 🟪 紫: ローン返済期間")
 
             # ==========================================
-            # ★ AI相談機能（エラー回避のためURLパラメータからクリップボード手動コピーへ変更）
+            # ★ AI相談機能
             # ==========================================
             st.divider()
             st.subheader("🤖 AI（ChatGPT）にシミュレーション結果を相談する")
@@ -415,7 +420,6 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
    - 今すぐ実行できる家計の見直しや、将来の資産をより確実にするための具体的な行動を3〜5つ提案してください。
    - 耳の痛い指摘（支出の削減が必要、目標が高すぎる等）もプロの視点で遠慮なくお伝えください。
 """
-            # エラー回避のため、URLにはプロンプトを含めずに単純なリンクにする
             chatgpt_url = "https://chatgpt.com/"
             
             st.markdown("##### 📝 相談の手順")
@@ -423,6 +427,7 @@ if st.button("シミュレーションを実行する (10,000回)", type="primar
             st.code(prompt_text, language="markdown")
 
             st.info("✅ **ステップ2:** 以下のボタンから、AIに読ませるための「シミュレーション結果(CSVデータ)」をダウンロードしてください。")
+            # ダウンロードボタンを押しても画面が消えなくなりました！
             st.download_button("📥 CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
             
             st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
