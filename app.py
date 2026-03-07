@@ -151,7 +151,6 @@ with st.expander("▼ 基本設定（ここをタップして変更）", expande
     else:
         pension_start_age = 65; pension_annual = 0
 
-
 # 計算用数値
 mean_return = mean_return_pct / 100
 risk_std = risk_std_pct / 100
@@ -215,7 +214,6 @@ with col1:
             new_end = st.number_input(f"何歳まで？ (第{i+1}期間)", min_value=min_val, max_value=150, value=current_end_val, key=f"phase_end_{i}")
             st.session_state.phases_list[i]["end"] = new_end
         with c_p2:
-            # ★元に戻しました（シンプルな入力欄）
             new_amount = st.number_input(
                 f"年間の収支 (万円)", 
                 value=int(phase["amount"]), 
