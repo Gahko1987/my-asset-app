@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import japanize_matplotlib
 import matplotlib.ticker as ticker
 import urllib.parse
+import json
 
 # ページ設定
 st.set_page_config(page_title="資産ライフプランシミュレーター", layout="wide")
@@ -303,45 +304,89 @@ if st.session_state.get("sim_executed", False):
             bottom_20_res = np.percentile(simulation_results, 20, axis=0)
             ruin_prob = (np.sum(simulation_results[:, -1] == 0) / num_simulations) * 100
             total_edu = sum(education_cost_map.values())
-            
-            st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
-            if total_edu > 0: st.info(f"🎓 **教育費**: 総額 約 {total_edu:,} 万円 を考慮済")
-            if use_pension: st.success(f"👴 **年金**: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
-            
+            survival_rate = 100 - ruin_prob
+
+            if survival_rate >= 90:
+                survival_comment = "安全性が高い"
+                survival_message = "資産生存率は90%以上です。現時点の前提では安全性が高い計画です。"
+                survival_level = "success"
+            elif survival_rate >= 70:
+                survival_comment = "おおむね問題ないが注意"
+                survival_message = "資産生存率は70%以上90%未満です。おおむね問題ありませんが、支出増や運用悪化への備えを確認してください。"
+                survival_level = "warning"
+            else:
+                survival_comment = "資金ショートリスクが高い"
+                survival_message = "資産生存率は70%未満です。資金ショートリスクが高いため、支出・収入・運用前提の見直しを優先してください。"
+                survival_level = "error"
+
+            age_axis = np.arange(current_age, end_age + 1)
+
+            def first_age_below(values, threshold):
+                for age, value in zip(age_axis, values):
+                    if value < threshold:
+                        return int(age)
+                return None
+
+            def first_age_at_or_below(values, threshold):
+                for age, value in zip(age_axis, values):
+                    if value <= threshold:
+                        return int(age)
+                return None
+
+            bottom_20_thresholds = {
+                "1,000万円未満": first_age_below(bottom_20_res, 1000),
+                "500万円未満": first_age_below(bottom_20_res, 500),
+                "0万円": first_age_at_or_below(bottom_20_res, 0),
+            }
+
+            def format_age_or_none(age):
+                return f"{age}歳" if age is not None else "該当なし"
+
+            education_ages = {age for age, cost in education_cost_map.items() if cost > 0}
+            if housing_info["type"] != "none":
+                housing_ages = set(range(int(housing_info["start_age"]), int(housing_info["end_age"]) + 1))
+            else:
+                housing_ages = set()
+            overlap_ages = sorted(age for age in education_ages & housing_ages if current_age <= age <= end_age)
+
             total_loan = 0
             if housing_info["type"] != "none":
-                total_loan = sum([item["annual_pmt"] for item in housing_info["schedule"].values()])
-                st.warning(f"🏠 **住宅ローン**: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。総支払額は約 {int(total_loan):,} 万円 です。")
+                total_loan = sum(item["annual_pmt"] for item in housing_info["schedule"].values())
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric(f"{end_age}歳生存率", f"{100 - ruin_prob:.1f}%")
-            c2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
-            c3.metric("中央値", f"{int(median_res[-1]):,}万")
-            c4.metric("不調時 (下位20%)", f"{int(bottom_20_res[-1]):,}万")
+            auto_advices = []
+            if ruin_prob > 20:
+                auto_advices.append("破綻確率が20%を超えています。固定費・大型支出・退職後収支の見直しを優先してください。")
+            if total_edu > 2000:
+                auto_advices.append("教育費総額が2,000万円を超えています。進学時期の支出ピークに合わせた現金準備を検討してください。")
+            if bottom_20_res[-1] < 1000:
+                auto_advices.append("下位20%ケースの最終資産が1,000万円未満です。運用不調時でも残せる資産水準を引き上げる対策が必要です。")
+            if total_loan > 5000:
+                auto_advices.append("住宅ローン総支払額が5,000万円を超えています。金利上昇時の返済余力と繰上返済の方針を確認してください。")
+            if not auto_advices:
+                auto_advices.append("今回の追加チェック条件では、強い警戒シグナルは出ていません。前提が変わった場合は再シミュレーションしてください。")
 
             fig, ax = plt.subplots(figsize=(10, 6))
-            age_axis = np.arange(current_age, end_age + 1)
             for age, cost in education_cost_map.items():
-                if cost > 0: ax.axvspan(age, age+1, color='cyan', alpha=0.1)
+                if cost > 0:
+                    ax.axvspan(age, age + 1, color='cyan', alpha=0.1)
             for y in range(years):
                 age = current_age + y
-                if net_arr[y] < 0: ax.axvspan(age, age+1, color='orange', alpha=0.1)
+                if net_arr[y] < 0:
+                    ax.axvspan(age, age + 1, color='orange', alpha=0.1)
                 if housing_info["type"] != "none" and housing_info["start_age"] <= age <= housing_info["end_age"]:
-                    ax.axvspan(age, age+1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
+                    ax.axvspan(age, age + 1, ymin=0, ymax=0.05, color='purple', alpha=0.5)
             ax.plot(age_axis, principal_assets, color='gray', linewidth=2, label='積立元本')
             ax.plot(age_axis, deterministic_assets, color='orange', linewidth=3, linestyle=':', label='単純計算')
             ax.plot(age_axis, median_res, color='blue', linewidth=2, label='中央値')
             ax.plot(age_axis, top_20_res, color='green', linestyle='--', label='好調 (上位20%)')
             ax.plot(age_axis, bottom_20_res, color='red', linestyle='--', label='不調 (下位20%)')
-            ax.set_title("資産推移", fontsize=14); ax.set_xlabel("年齢"); ax.set_ylabel("資産額 (万円)")
-            ax.legend(); ax.grid(True, linestyle='--', alpha=0.7)
+            ax.set_title("資産推移", fontsize=14)
+            ax.set_xlabel("年齢")
+            ax.set_ylabel("資産額 (万円)")
+            ax.legend()
+            ax.grid(True, linestyle='--', alpha=0.7)
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f'{int(x):,}'))
-            st.pyplot(fig)
-            st.caption("🟦 水色: 教育費 / 🟧 オレンジ: 収支赤字 / 🟩 緑: 教育費＋赤字 / 🟪 紫: ローン返済期間")
 
-            # --- CF明細と積立元本推移のテーブル ---
-            st.divider()
-            st.subheader("🧾 キャッシュフロー明細と積立元本の推移 (1歳ごと)")
             cf_rows = []
             for y in range(years):
                 cf_rows.append({
@@ -355,15 +400,8 @@ if st.session_state.get("sim_executed", False):
                     "年間純収支": f"{int(net_arr[y]):,} 万円",
                     "年末積立元本": f"{int(principal_assets[y+1]):,} 万円"
                 })
-            
             df_cf = pd.DataFrame(cf_rows).set_index("年齢")
-            st.dataframe(df_cf, use_container_width=True)
-            st.caption("※ 各項目の合計が「年間純収支」となり、年初の元本に足されて「年末積立元本」になります。（ただし、元本は0未満にならないよう計算されます）")
 
-            # --- 詳細データ表 ---
-            st.divider()
-            st.subheader("📋 詳細データ: 資産額の分布 (1歳ごと)")
-            
             percentiles_to_calc = [
                 ("上位 10%ライン", 90),
                 ("上位 20%ライン", 80),
@@ -376,81 +414,72 @@ if st.session_state.get("sim_executed", False):
                 ("下位 10%ライン", 10),
                 ("最下位 (ワースト)", 0)
             ]
-            
             d_data = {"ランク": [p[0] for p in percentiles_to_calc]}
             r_data = {"指標": ["単純計算", "積立元本"]}
-
             for y in range(years + 1):
                 age = current_age + y
                 vals = simulation_results[:, y]
-                col_vals = []
-                for label, p_val in percentiles_to_calc:
-                    val_at_p = np.percentile(vals, p_val)
-                    col_vals.append(f"{int(val_at_p):,} 万円")
-                
-                d_data[f"{age}歳"] = col_vals
+                d_data[f"{age}歳"] = [f"{int(np.percentile(vals, p_val)):,} 万円" for _, p_val in percentiles_to_calc]
                 r_data[f"{age}歳"] = [f"{int(deterministic_assets[y]):,} 万円", f"{int(principal_assets[y]):,} 万円"]
-
             df_dist = pd.DataFrame(d_data).set_index("ランク")
-            st.dataframe(df_dist, use_container_width=True)
-            st.caption("👇 比較用データ")
             df_ref = pd.DataFrame(r_data).set_index("指標")
-            st.dataframe(df_ref, use_container_width=True)
 
-            st.divider()
-            st.subheader("🎓 教育費の内訳詳細")
             edu_rows = []
             grand_total = 0
-            c_totals = [0]*len(st.session_state.children_list)
+            c_totals = [0] * len(st.session_state.children_list)
             for y in range(years + 1):
                 p_age = current_age + y
-                y_tot = 0; row = {"親の年齢": f"{p_age}歳"}; has = False
+                y_tot = 0
+                row = {"親の年齢": f"{p_age}歳"}
+                has = False
                 for i, child in enumerate(st.session_state.children_list):
                     c_age = child["age"] + y
                     stg = get_school_stage(c_age, child["course"])
                     if stg:
                         cost = EDU_COSTS[child["course"]][stg]
-                        y_tot += cost; c_totals[i] += cost; grand_total += cost
-                        row[f"子供{i+1}"] = f"{c_age}歳({STAGE_NAMES.get(stg, stg)}): {cost}万"
+                        y_tot += cost
+                        c_totals[i] += cost
+                        grand_total += cost
+                        row[f"子供{i+1}"] = f"{c_age}歳({STAGE_NAMES.get(stg, stg)}): {cost}万円"
                         has = True
-                    else: row[f"子供{i+1}"] = "-"
+                    else:
+                        row[f"子供{i+1}"] = "-"
                 if has:
                     row["教育費合計"] = f"▲{y_tot}万円"
                     edu_rows.append(row)
             if edu_rows:
                 total_row = {"親の年齢": "合計"}
-                for i, t in enumerate(c_totals): total_row[f"子供{i+1}"] = f"{t:,}万円"
+                for i, t in enumerate(c_totals):
+                    total_row[f"子供{i+1}"] = f"{t:,}万円"
                 total_row["教育費合計"] = f"{grand_total:,}万円"
                 edu_rows.append(total_row)
-                st.dataframe(pd.DataFrame(edu_rows).set_index("親の年齢"), use_container_width=True)
-            else: st.info("教育費がかかる期間はありません。")
-                
+            df_edu = pd.DataFrame(edu_rows).set_index("親の年齢") if edu_rows else pd.DataFrame()
+
+            loan_rows = []
             if housing_info["type"] != "none":
-                st.divider()
-                st.subheader("🏠 住宅ローン返済の内訳詳細 (金利変動対応)")
-                loan_rows = []
                 for y in range(years + 1):
                     p_age = current_age + y
                     if p_age <= housing_info["end_age"] + 3:
                         if housing_info["start_age"] <= p_age <= housing_info["end_age"]:
-                            info = housing_info["schedule"][p_age]
+                            info = housing_info["schedule"].get(p_age)
+                            if info is None:
+                                continue
                             actual_pmt = info["annual_pmt"]
                             increase = max(0, actual_pmt - housing_info["base_pmt"])
-                            loan_rows.append({"年齢": f"{p_age}歳", "状態": "返済中", "適用金利": f"{info['rate']:.2f} %", "年間返済額": f"{int(actual_pmt):,} 万円", "増加分(収支マイナス)": f"▲ {int(increase):,} 万円" if increase > 0 else "0 万円", "年末残高": f"{int(info['balance']):,} 万円"})
+                            loan_rows.append({
+                                "年齢": f"{p_age}歳",
+                                "状態": "返済中",
+                                "適用金利": f"{info['rate']:.2f} %",
+                                "年間返済額": f"{int(actual_pmt):,} 万円",
+                                "増加分(収支マイナス)": f"▲ {int(increase):,} 万円" if increase > 0 else "0 万円",
+                                "年末残高": f"{int(info['balance']):,} 万円"
+                            })
                         elif p_age > housing_info["end_age"]:
-                            loan_rows.append({"年齢": f"{p_age}歳", "状態": "完済 🎉", "適用金利": "-", "年間返済額": "-", "増加分(収支マイナス)": "-", "年末残高": "-"})
+                            loan_rows.append({"年齢": f"{p_age}歳", "状態": "完済", "適用金利": "-", "年間返済額": "-", "増加分(収支マイナス)": "-", "年末残高": "-"})
                         elif p_age < housing_info["start_age"]:
                             loan_rows.append({"年齢": f"{p_age}歳", "状態": "購入前", "適用金利": "-", "年間返済額": "-", "増加分(収支マイナス)": "-", "年末残高": "-"})
-                if loan_rows:
-                    st.dataframe(pd.DataFrame(loan_rows).set_index("年齢"), use_container_width=True)
+            df_loan = pd.DataFrame(loan_rows).set_index("年齢") if loan_rows else pd.DataFrame()
 
-            # ==========================================
-            # ★ AI相談機能 (一番下へ配置＆CSV内容拡充)
-            # ==========================================
-            st.divider()
-            st.subheader("🤖 AI（ChatGPT）にシミュレーション結果を相談する")
-            
-            # CSV作成（明細データも追加！）
             csv_data = pd.DataFrame({
                 "年齢": age_axis,
                 "基本収支(万円)": b_arr,
@@ -467,26 +496,59 @@ if st.session_state.get("sim_executed", False):
             })
             csv_file = csv_data.to_csv(index=False).encode('utf-8-sig')
 
-            # プロンプト生成
+            input_conditions = {
+                "basic": {
+                    "current_age": current_age,
+                    "current_assets_man_yen": current_assets,
+                    "inflation_rate_pct": inflation_rate_pct,
+                    "mean_return_pct": mean_return_pct,
+                    "risk_std_pct": risk_std_pct,
+                    "end_age": end_age,
+                    "num_simulations": num_simulations,
+                },
+                "life_stages": st.session_state.phases_list,
+                "children": st.session_state.children_list,
+                "events": st.session_state.events_list,
+                "housing": {
+                    "option": housing_option,
+                    "type": housing_info["type"],
+                    "start_age": housing_info["start_age"],
+                    "end_age": housing_info["end_age"],
+                    "base_payment_man_yen": int(housing_info["base_pmt"]),
+                    "total_payment_man_yen": int(total_loan),
+                    "current_rent_saved_man_yen": housing_info["current_rent_saved"],
+                },
+                "pension": {
+                    "use_pension": use_pension,
+                    "start_age": pension_start_age,
+                    "annual_man_yen": pension_annual,
+                },
+            }
+            json_file = json.dumps(input_conditions, ensure_ascii=False, indent=2).encode('utf-8')
+
             prompt_text = f"""あなたは経験豊富で優秀なファイナンシャルプランナー（FP）です。
 クライアントから提供された以下の【家計シミュレーション結果】と【詳細な前提条件】を分析し、
 将来の家計破綻リスクを回避し、より豊かなライフプランを実現するためのプロフェッショナルなアドバイスを提供してください。
 ※私が添付したCSVファイルには、各年齢の「キャッシュフロー明細（基本収支、年金、住宅、教育費などの内訳）」と「モンテカルロシミュレーションの資産推移データ」が含まれています。併せて詳細な分析に活用してください。
 
 ---
-### 📊 クライアントの基本情報とシミュレーション結果
+### クライアントの基本情報とシミュレーション結果
 
 【1. 基本プロファイル・投資設定】
 ・現在の年齢: {current_age}歳
 ・現在の資産額: {current_assets}万円
 ・想定運用利回り: {mean_return_pct}% / リスク(標準偏差): {risk_std_pct}% / インフレ率: {inflation_rate_pct}%
 
-【2. ライフステージ別の基本収支（年金・ローン・教育費を除く手取り収入−基本生活費）】\n"""
-            for p in st.session_state.phases_list: prompt_text += f"・〜{p['end']}歳: 年間 {p['amount']}万円\n"
-            
+【2. ライフステージ別の基本収支（年金・ローン・教育費を除く手取り収入−基本生活費）】
+"""
+            for p in st.session_state.phases_list:
+                prompt_text += f"・〜{p['end']}歳: 年間 {p['amount']}万円\n"
+
             prompt_text += "\n【3. 特別なライフイベント（一時的な収入・支出）】\n"
-            if not st.session_state.events_list: prompt_text += "・特になし\n"
-            for e in st.session_state.events_list: prompt_text += f"・{e['age']}歳: {e['amount']}万円 ({e['name']})\n"
+            if not st.session_state.events_list:
+                prompt_text += "・特になし\n"
+            for e in st.session_state.events_list:
+                prompt_text += f"・{e['age']}歳: {e['amount']}万円 ({e['name']})\n"
 
             prompt_text += "\n【4. 家族構成・教育費プラン】\n"
             if st.session_state.children_list:
@@ -496,65 +558,121 @@ if st.session_state.get("sim_executed", False):
                 prompt_text += "・子供なし\n"
 
             prompt_text += "\n【5. 住宅・ローン状況】\n"
-            if housing_option == "これから購入予定":
-                prompt_text += f"・購入年齢: {h_age}歳 / 物件価格: {h_price}万円 (頭金: {h_down}万円) / 返済期間: {h_years}年\n"
-                prompt_text += f"・金利: 初期{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
-                prompt_text += f"・※保守的見積もりのため、ローン完済後の住居費軽減効果（浮いた家賃分）はシミュレーション上のプラスに含めていません。\n"
-            elif housing_option == "すでに購入済み (ローン返済中)":
-                prompt_text += f"・ローン残高: {loan_principal}万円 / 残り返済期間: {h_years_remain}年\n"
-                prompt_text += f"・金利: 現在{h_rate}% (毎年+{h_rate_inc}%, 上限{h_rate_max}%)\n"
-                prompt_text += f"・※保守的見積もりのため、ローン完済後の収支改善効果はシミュレーション上のプラスに含めていません。\n"
+            if housing_info["type"] == "future":
+                prompt_text += f"・購入年齢: {housing_info['start_age']}歳 / 返済終了: {housing_info['end_age']}歳\n"
+                prompt_text += "・※保守的見積もりのため、ローン完済後の住居費軽減効果はシミュレーション上のプラスに含めていません。\n"
+            elif housing_info["type"] == "already":
+                prompt_text += f"・返済中ローン: {housing_info['start_age']}歳〜{housing_info['end_age']}歳 / 年間初回返済額 約{int(housing_info['base_pmt'])}万円\n"
+                prompt_text += "・※保守的見積もりのため、ローン完済後の収支改善効果はシミュレーション上のプラスに含めていません。\n"
             else:
                 prompt_text += "・賃貸またはローンなし\n"
 
             prompt_text += "\n【6. 老後・年金見込み】\n"
-            if use_pension: prompt_text += f"・受給開始年齢: {pension_start_age}歳 / 年額見込み: {pension_annual}万円\n"
-            else: prompt_text += "・年金考慮なし\n"
+            if use_pension:
+                prompt_text += f"・受給開始年齢: {pension_start_age}歳 / 年額見込み: {pension_annual}万円\n"
+            else:
+                prompt_text += "・年金考慮なし\n"
 
             prompt_text += f"""
 【7. モンテカルロシミュレーション結果 ({end_age}歳時点・1万回試行)】
-・資産生存率（破綻しない確率）: {100 - ruin_prob:.1f}%
+・資産生存率（破綻しない確率）: {survival_rate:.1f}%（{survival_comment}）
 ・中央値（標準的なケースの最終資産）: {int(median_res[-1]):,}万円
 ・下位20%（不調時のワーストケース）: {int(bottom_20_res[-1]):,}万円
-"""
-            if total_edu > 0: prompt_text += f"・教育費総額見込み: 約{total_edu:,}万円\n"
-            if housing_info["type"] != "none": prompt_text += f"・住宅ローン総支払見込み: 約{int(total_loan):,}万円\n"
+・教育費総額見込み: 約{total_edu:,}万円
+・住宅ローン総支払見込み: 約{int(total_loan):,}万円
 
-            prompt_text += """
+【8. 追加チェック】
+・下位20%が1,000万円未満になる年齢: {format_age_or_none(bottom_20_thresholds['1,000万円未満'])}
+・下位20%が500万円未満になる年齢: {format_age_or_none(bottom_20_thresholds['500万円未満'])}
+・下位20%が0万円になる年齢: {format_age_or_none(bottom_20_thresholds['0万円'])}
+・教育費と住宅ローンが重なる年齢: {', '.join([str(a) + '歳' for a in overlap_ages]) if overlap_ages else '該当なし'}
+
 ---
-### 📝 FPとしてのコンサルティング依頼事項
-上記のデータに基づき、以下の点について具体的かつ実践的なアドバイスを提示してください。
-
-1. **現状の評価と潜在的なリスクの洗い出し**:
-   - 資産生存率やワーストケースの数字から見て、この計画の安全性はどう評価できますか？
-   - 添付のCSVデータ（キャッシュフロー明細）から読み取れる、資金ショートの危険性が高い「要注意期間」はいつですか？
-
-2. **住宅ローンに関するアドバイス** (※該当する場合のみ):
-   - 金利上昇リスク（変動金利の場合）に対する具体的な備え方はありますか？
-   - 繰り上げ返済をすべきか、投資に回すべきかの判断基準を教えてください。
-
-3. **資産運用とインフレ対策**:
-   - 現在の利回り・リスク設定は、目標達成やインフレ率に対して適切ですか？
-   - 現金比率と投資比率のバランスはどうコントロールすべきでしょうか。
-
-4. **具体的なアクションプラン（改善策）の提案**:
-   - 今すぐ実行できる家計の見直しや、将来の資産をより確実にするための具体的な行動を3〜5つ提案してください。
-   - 耳の痛い指摘（支出の削減が必要、目標が高すぎる等）もプロの視点で遠慮なくお伝えください。
+### FPとしてのコンサルティング依頼事項
+上記のデータに基づき、現状評価、要注意期間、住宅ローン、資産運用、インフレ対策、具体的な改善アクションを提案してください。
 """
             chatgpt_url = "https://chatgpt.com/"
-            
-            st.markdown("##### 📝 相談の手順")
-            st.info("✅ **ステップ1:** 以下の枠内にあるテキストの右上に出る「コピーボタン」を押して、文章をコピーしてください。")
-            st.code(prompt_text, language="markdown")
 
-            st.info("✅ **ステップ2:** 以下のボタンから、AIに読ませるための「詳細明細データ(CSV)」をダウンロードしてください。")
-            st.download_button("📥 CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
-            
-            st.info("✅ **ステップ3:** 以下のボタンでChatGPTを開き、**【ステップ1でコピーした文章を貼り付け】** ＋ **【ステップ2のCSVファイルをクリップ📎マークから添付】** して送信してください！")
-            st.link_button("💬 ChatGPTを開く", chatgpt_url, type="primary")
+            st.subheader(f"シミュレーション結果 ({end_age}歳まで)")
+            tabs = st.tabs(["結果サマリー", "資産推移グラフ", "キャッシュフロー明細", "教育費・住宅ローン詳細", "AI相談"])
+
+            with tabs[0]:
+                if total_edu > 0:
+                    st.info(f"教育費: 総額 約 {total_edu:,} 万円 を考慮済")
+                if use_pension:
+                    st.success(f"年金: {pension_start_age}歳から年額 {pension_annual:,} 万円 を加算済")
+                if housing_info["type"] != "none":
+                    st.warning(f"住宅ローン: {housing_info['start_age']}歳〜{housing_info['end_age']}歳まで返済。総支払額は約 {int(total_loan):,} 万円 です。")
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric(f"{end_age}歳生存率", f"{survival_rate:.1f}%")
+                c2.metric("単純計算", f"{int(deterministic_assets[-1]):,}万")
+                c3.metric("中央値", f"{int(median_res[-1]):,}万")
+                c4.metric("不調時 (下位20%)", f"{int(bottom_20_res[-1]):,}万")
+
+                if survival_level == "success":
+                    st.success(f"自動判定: {survival_comment}。{survival_message}")
+                elif survival_level == "warning":
+                    st.warning(f"自動判定: {survival_comment}。{survival_message}")
+                else:
+                    st.error(f"自動判定: {survival_comment}。{survival_message}")
+
+                st.markdown("##### 下位20%ケースの資産低下タイミング")
+                threshold_cols = st.columns(3)
+                for col, (label, age) in zip(threshold_cols, bottom_20_thresholds.items()):
+                    col.metric(label, f"{age}歳" if age is not None else "該当なし")
+
+                st.markdown("##### 教育費と住宅ローンが重なる年齢")
+                if overlap_ages:
+                    st.write("、".join([f"{age}歳" for age in overlap_ages]))
+                else:
+                    st.write("該当なし")
+
+                st.markdown("##### 自動アドバイス")
+                for advice in auto_advices:
+                    st.write(f"- {advice}")
+
+                st.download_button("入力条件をJSONでダウンロード", data=json_file, file_name="simulation_inputs.json", mime="application/json")
+
+            with tabs[1]:
+                st.pyplot(fig)
+                st.caption("水色: 教育費 / オレンジ: 収支赤字 / 紫: ローン返済期間")
+                st.markdown("##### 詳細データ: 資産額の分布 (1歳ごと)")
+                st.dataframe(df_dist, use_container_width=True)
+                st.caption("比較用データ")
+                st.dataframe(df_ref, use_container_width=True)
+
+            with tabs[2]:
+                st.subheader("キャッシュフロー明細と積立元本の推移 (1歳ごと)")
+                st.dataframe(df_cf, use_container_width=True)
+                st.caption("※ 各項目の合計が『年間純収支』となり、年初の元本に足されて『年末積立元本』になります。（ただし、元本は0未満にならないよう計算されます）")
+
+            with tabs[3]:
+                st.subheader("教育費の内訳詳細")
+                if not df_edu.empty:
+                    st.dataframe(df_edu, use_container_width=True)
+                else:
+                    st.info("教育費がかかる期間はありません。")
+
+                st.subheader("住宅ローン返済の内訳詳細 (金利変動対応)")
+                if not df_loan.empty:
+                    st.dataframe(df_loan, use_container_width=True)
+                else:
+                    st.info("住宅ローン返済の対象期間はありません。")
+
+            with tabs[4]:
+                st.subheader("AI（ChatGPT）にシミュレーション結果を相談する")
+                st.markdown("##### 相談の手順")
+                st.info("ステップ1: 以下の枠内にあるテキストをコピーしてください。")
+                st.code(prompt_text, language="markdown")
+                st.info("ステップ2: AIに読ませるための詳細明細データ(CSV)をダウンロードしてください。")
+                st.download_button("CSVデータをダウンロード", data=csv_file, file_name="simulation_results.csv", mime="text/csv")
+                st.info("ステップ3: ChatGPTを開き、コピーした文章を貼り付け、CSVファイルを添付して送信してください。")
+                st.link_button("ChatGPTを開く", chatgpt_url, type="primary")
 
         else:
             st.error("終了年齢は現在の年齢より大きくしてください。")
+
 
     except Exception as e:
         st.error(f"エラーが発生しました: {e}")
