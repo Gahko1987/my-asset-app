@@ -1,4 +1,4 @@
-"""資産ライフプランシミュレーター v2
+"""資産ライフプランシミュレーター v2.2
 Run: streamlit run app.py
 Dependencies: streamlit, numpy, pandas (existing requirements.txt can be retained).
 All monetary inputs and outputs are in ten-thousand JPY, at today's purchasing power.
@@ -73,9 +73,67 @@ def calculate_loan_schedule(principal, years, initial_rate, annual_increase, max
     return schedule, base_pmt
 
 
+# Historical USD ETF proxies. Fixed snapshots, not live data or JPY fund estimates.
+RISK_PRESETS = {
+    'manual': {'label': '自分で入力・調整', 'risk': None},
+    'yen_cash_model': {
+        'label': '円預金（価格変動なしの簡易モデル）', 'risk': 0.0,
+        'fund': '円預金', 'as_of': 'モデル仮定', 'url': None, 'kind': 'model',
+        'note': '0%は名目残高に市場価格の変動を付けない計算上の仮定です。預金金利の変更、信用リスク、預金保険の限度額は計算しません。'},
+    'retail_jgb_model': {
+        'label': '個人向け国債（元本を額面で扱う簡易モデル）', 'risk': 0.0,
+        'fund': '個人向け国債', 'as_of': 'モデル仮定', 'kind': 'model',
+        'url': 'https://www.mof.go.jp/jgbs/individual/kojinmuke/main/guide/',
+        'note': '0%は元本を額面で扱う仮定で、実測した収益率の標準偏差ではありません。変動10年の利率変更、満期後の再投資利率、原則1年間の換金制限、中途換金調整額は再現しません。通常の市場売買する国債や国債ETFとは異なります。'},
+    'jgb_etf_jpy_20260731': {
+        'label': '日本国債ETF（円建て・市場価格は変動）', 'risk': 4.14,
+        'fund': 'iシェアーズ・コア 日本国債 ETF（2561）', 'as_of': '2026-07-31',
+        'kind': 'jpy_etf',
+        'url': 'https://www.blackrock.com/jp/individual-en/en/literature/fact-sheet/2561-ishares-core-japan-government-bond-etf-fund-fact-sheet-en-jp.pdf',
+        'note': '円建てETFの過去3年間の年率標準偏差です。金利上昇などで価格が下がる場合があり、元本保証ではありません。'},
+    'acwi_usd_20260731': {
+        'label': 'オルカンの参考：MSCI ACWI（米ドル建てETF）', 'risk': 12.29,
+        'fund': 'iShares MSCI ACWI ETF (ACWI)', 'as_of': '2026-07-31',
+        'url': 'https://www.ishares.com/us/products/239600/ishares-msci-acwi-etf'},
+    'sp500_usd_20260731': {
+        'label': 'S&P 500（米ドル建てETF）', 'risk': 13.06,
+        'fund': 'iShares Core S&P 500 ETF (IVV)', 'as_of': '2026-07-31',
+        'url': 'https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf'},
+    'nasdaq100_usd_20260831': {
+        'label': 'NASDAQ-100（米ドル建てETF）', 'risk': 17.71,
+        'fund': 'iShares NASDAQ 100 UCITS ETF (USD)', 'as_of': '2026-08-31',
+        'url': 'https://www.ishares.com/ch/individual/en/products/253741/ishares-nasdaq-100-ucits-etf'},
+}
+RISK_NOTE = ('株式の参考値は米ドル建てETF、日本国債ETFは円建てETFの過去3年間の年率標準偏差です。'
+             '株式の参考値に円換算の為替変動は含みません。NASDAQはNASDAQ-100です。'
+             '各値は記載時点の固定値で、自動更新はしません。過去3年間が長期の変動を代表するとは限りません。'
+             '円預金・個人向け国債の0%は名目価格の変動を付けないモデル仮定で、実測値や無リスクの保証ではありません。'
+             '金利変更、満期後の再投資、信用リスク、換金制限・調整額はモデル化していません。'
+             '価格が変動しなくてもインフレで購買力は低下します。'
+             '選択時に変わるのは標準偏差だけです。想定利回りは実際の税引後利率などに合わせて別途入力してください。'
+             '複数資産を保有する場合は資産全体の変動幅を別途調整してください。')
+
+
+def risk_reference(preset):
+    title = f"[{preset['fund']}]({preset['url']})" if preset.get('url') else preset['fund']
+    basis = '計算上の仮定・実測値ではありません' if preset.get('kind') == 'model' else f"{preset['as_of']}、過去3年間・年率"
+    return f"{title}：{preset['risk']:.2f}%（{basis}）"
+
+
+
+def apply_risk_preset(preset_key, risk_key):
+    preset = RISK_PRESETS[st.session_state[preset_key]]
+    if preset['risk'] is not None:
+        st.session_state[risk_key] = preset['risk']
+
+
+def mark_risk_manual(preset_key):
+    st.session_state[preset_key] = 'manual'
+
+
 DEFAULT = {
     'version': 2, 'name': '基本プラン', 'age': 35, 'assets': 500.0, 'end': 100,
-    'inflation': 2.0, 'return': 5.0, 'risk': 15.0,
+    'inflation': 2.0, 'return': 5.0, 'risk': 15.0, 'risk_preset': 'manual',
     'pension_on': True, 'pension_age': 65, 'pension': 240.0,
     'housing': 'none', 'buy_age': 40, 'price': 4000.0, 'down': 500.0,
     'rent': 120.0, 'principal': 3000.0, 'loan_years': 35,
@@ -102,6 +160,10 @@ MODEL_NOTE = (
 def validate(c):
     if not isinstance(c, dict) or c.get('version') != 2:
         raise ValueError('この改修版で保存した条件ファイル（version 2）を選んでください。旧版JSONは住宅の入力情報が不足しています。')
+    c = copy.deepcopy(c)
+    c.setdefault('risk_preset', 'manual')  # Keep v2 saved inputs readable.
+    if not isinstance(c['risk_preset'], str) or c['risk_preset'] not in RISK_PRESETS:
+        raise ValueError('変動幅の選択が正しくありません。')
     if set(DEFAULT) - set(c):
         raise ValueError('入力条件の項目が不足しています。')
     c = copy.deepcopy({k: c[k] for k in DEFAULT})
@@ -119,6 +181,9 @@ def validate(c):
         if k in ints and v != int(v):
             raise ValueError(f'{k}: 年齢・年数は整数で入力してください。')
         c[k] = int(v) if k in ints else float(v)
+    selected_risk = RISK_PRESETS[c['risk_preset']]['risk']
+    if selected_risk is not None and not math.isclose(c['risk'], selected_risk, abs_tol=1e-9):
+        c['risk_preset'] = 'manual'  # Preserve edited saved values without a false preset label.
     if not isinstance(c['name'], str) or not c['name'].strip() or len(c['name']) > 60:
         raise ValueError('プラン名を1〜60文字で入力してください。')
     for k in ('pension_on', 'after_payoff'):
@@ -276,8 +341,34 @@ def main():
             number('end', '何歳の到達時点まで計算しますか？', 1, 150)
         with right:
             number('return', '想定利回り（年率・税手数料控除後 %）', 0.0, 20.0, 0.1)
-            number('risk', '運用の変動幅（年率の標準偏差 %）', 0.0, 40.0, 0.5)
+            preset_ids = list(RISK_PRESETS)
+            c['risk_preset'] = st.selectbox(
+                '投資対象から変動幅を入力', preset_ids,
+                index=preset_ids.index(source.get('risk_preset', 'manual')),
+                format_func=lambda x: RISK_PRESETS[x]['label'], key=key('risk_preset'),
+                on_change=apply_risk_preset, args=(key('risk_preset'), key('risk')))
+            if key('risk') not in st.session_state:
+                st.session_state[key('risk')] = float(source['risk'])
+            c['risk'] = st.number_input('運用の変動幅（年率の標準偏差 %）',
+                min_value=0.0, max_value=40.0, step=0.1, format='%.2f', key=key('risk'),
+                on_change=mark_risk_manual, args=(key('risk_preset'),))
+            preset = RISK_PRESETS[c['risk_preset']]
+            if preset['risk'] is not None:
+                st.markdown(risk_reference(preset))
+                st.caption(preset.get('note', '米ドル建てETFの参考値です。円換算の為替変動は含みません。'))
+                if preset.get('kind') in ('model', 'jpy_etf'):
+                    st.info(f"想定利回りは現在 {c['return']:.1f}% のままです。預金・国債などの税引後利率や運用想定に合わせて上の欄を確認・変更してください。")
+            st.caption('投資対象を選ぶと変動幅だけが変わります。数値を直接変更すると「自分で入力・調整」に切り替わります。')
             number('inflation', 'インフレ率（年率 %）', 0.0, 5.0, 0.1)
+        if c['risk'] > 0:
+            st.info(f'変動幅のイメージ：想定利回り{c["return"]:.1f}%・変動幅{c["risk"]:.2f}%なら、正規分布の仮定で約68%の年の名目収益率が {c["return"]-c["risk"]:.2f}%〜{c["return"]+c["risk"]:.2f}% に入る目安です。最大損失や保証範囲ではありません。')
+        else:
+            st.info('変動幅0%では、このモデルの運用利回りは毎年一定になります。')
+        with st.expander('投資対象の参考値・出典と注意点'):
+            st.write(RISK_NOTE)
+            for preset in RISK_PRESETS.values():
+                if preset['risk'] is not None:
+                    st.markdown('- ' + risk_reference(preset))
         st.caption('同じ条件では同じ結果になります。年齢別の運用乱数をそろえてプランを比較します。')
     with tabs[1]:
         st.info('基本収支＝手取り収入−生活費。現在の家賃・ローン返済を含め、ここで別入力する年金・教育費・イベントは除いてください。プラスは積立、マイナスは取り崩しです。')
@@ -390,6 +481,7 @@ def render_result(r):
             st.dataframe(assets.round(1), hide_index=True, use_container_width=True)
         with st.expander('計算の前提と数値の読み方'):
             st.write(MODEL_NOTE)
+            st.write(RISK_NOTE)
     with tabs[1]:
         st.bar_chart(flows.set_index('年齢')[['年間純収支']])
         st.dataframe(flows.round(1), hide_index=True, use_container_width=True)
@@ -444,6 +536,8 @@ def render_result(r):
 最終資産中央値：{assets['中央値'].iloc[-1]:,.0f}万円
 最終資産下位20%：{assets['下位20%'].iloc[-1]:,.0f}万円
 計算前提：{MODEL_NOTE}
+変動幅の参考値について：{RISK_NOTE}
+選択した参考値：{json.dumps(RISK_PRESETS[c["risk_preset"]], ensure_ascii=False)}
 入力条件（住宅費は基本収支に含み、差額を住宅調整として反映）：
 {dumps(c)}
 年間収支CSV：
